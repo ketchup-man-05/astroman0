@@ -1,5 +1,5 @@
 import swisseph as swe
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from geopy.geocoders import Nominatim
 import kp_math
 
@@ -9,6 +9,13 @@ swe.set_sid_mode(swe.SIDM_KRISHNAMURTI)
 ZODIAC_SIGNS = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
 SIGN_LORDS = ["Mars", "Venus", "Mercury", "Moon", "Sun", "Mercury", "Venus", "Mars", "Jupiter", "Saturn", "Saturn", "Jupiter"]
 NAKSHATRA_LORDS = ["Ketu", "Venus", "Sun", "Moon", "Mars", "Rahu", "Jupiter", "Saturn", "Mercury"]
+
+# --- PANCHANG CONSTANTS ---
+DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+DAY_LORDS = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn"]
+TITHIS = ["Pratipada", "Dwitiya", "Tritiya", "Chaturthi", "Panchami", "Shashthi", "Saptami", "Ashtami", "Navami", "Dashami", 
+          "Ekadashi", "Dwadashi", "Trayodashi", "Chaturdashi", "Purnima", "Pratipada", "Dwitiya", "Tritiya", "Chaturthi", 
+          "Panchami", "Shashthi", "Saptami", "Ashtami", "Navami", "Dashami", "Ekadashi", "Dwadashi", "Trayodashi", "Chaturdashi", "Amavasya"]
 
 # --- ASTRONOMY HELPER FUNCTIONS ---
 def get_sign_lord(degree):
@@ -21,7 +28,7 @@ def get_star_lord(degree):
 def get_true_agent(planet, planets_dict):
     """ADVANCED KP RULE: Rahu/Ketu steal identity via Conjunction first, then Sign Lord."""
     if planet not in ["Rahu", "Ketu"]:
-        return planet # Normal planets just return themselves
+        return planet
         
     node_lon = planets_dict[planet]
     
@@ -38,10 +45,8 @@ def get_true_agent(planet, planets_dict):
 
 def get_houses_owned_by_planet(planet, cusps, planets_dict):
     owned_houses = []
-    # Get the true planet (or the stolen identity if it's Rahu/Ketu)
     planet_to_check = get_true_agent(planet, planets_dict)
 
-    # pysweph v2.10.3.6 returns 13 elements, index 1 is 1st cusp
     for i in range(1, 13):
         if get_sign_lord(cusps[i]) == planet_to_check:
             owned_houses.append(i)
@@ -59,7 +64,7 @@ def calculate_placidus_cusps(target_ascendant, lat, lon):
     now = datetime.now(timezone.utc)
     base_jd = swe.julday(now.year, now.month, now.day, 0.0)
     
-    # STAGE 1: Coarse Search (Minute-by-Minute)
+    # STAGE 1: Coarse Search
     best_jd, min_diff = base_jd, 360.0
     for minute in range(24 * 60):
         test_jd = base_jd + (minute / 1440.0)
@@ -68,10 +73,10 @@ def calculate_placidus_cusps(target_ascendant, lat, lon):
         if diff > 180: diff = 360 - diff
         if diff < min_diff: min_diff, best_jd = diff, test_jd
 
-    # STAGE 2: Fine Search (Second-by-Second micro-tuning for KP Sub-Lords)
+    # STAGE 2: Fine Search
     final_best_jd = best_jd
     min_diff = 360.0
-    for sec in range(-120, 120): # Scan 2 minutes in either direction
+    for sec in range(-120, 120):
         test_jd = best_jd + (sec / 86400.0)
         cusps, ascmc = swe.houses_ex(test_jd, lat, lon, b'P', swe.FLG_SIDEREAL)
         diff = abs(ascmc[0] - target_ascendant)
@@ -83,7 +88,7 @@ def calculate_placidus_cusps(target_ascendant, lat, lon):
     return final_cusps
 
 def get_live_planets():
-    """Returns planet longitudes AND Retrograde status (Speed < 0)"""
+    """Returns planet longitudes AND Retrograde status"""
     now = datetime.now(timezone.utc)
     jd = swe.julday(now.year, now.month, now.day, now.hour + now.minute/60.0 + now.second/3600.0)
     planets = {"Sun": swe.SUN, "Moon": swe.MOON, "Mars": swe.MARS, "Mercury": swe.MERCURY, 
@@ -93,7 +98,6 @@ def get_live_planets():
     retrogrades = {}
     
     for name, p_id in planets.items():
-        # raw[0][0] is longitude, raw[0][3] is speed in longitude
         raw = swe.calc_ut(jd, p_id, swe.FLG_SIDEREAL | swe.FLG_SPEED)
         positions[name] = raw[0][0]
         speed = raw[0][3]
@@ -108,26 +112,40 @@ def get_live_planets():
     return positions, retrogrades
 
 def find_planet_house(planet_lon, cusps):
-    # Properly spans all 12 houses and handles the 360 -> 0 Aries crossover
     for i in range(1, 13):
         next_i = 1 if i == 12 else i + 1
-        
         if cusps[i] <= planet_lon < cusps[next_i]: 
             return i
-        
         if cusps[i] > cusps[next_i]:
             if planet_lon >= cusps[i] or planet_lon < cusps[next_i]:
                 return i
-    return 1 # Fallback safeguard
+    return 1
+
+# --- PANCHANG & RULING PLANET ENGINES ---
+def get_panchang_tithi(sun_lon, moon_lon):
+    diff = (moon_lon - sun_lon) % 360
+    tithi_index = int(diff / 12)
+    paksha = "Shukla (Waxing)" if tithi_index < 15 else "Krishna (Waning)"
+    return f"{paksha} {TITHIS[tithi_index]}"
+
+def get_current_day_lord():
+    # Hindu day changes at roughly 6 AM local time, not midnight.
+    now = datetime.now(timezone.utc)
+    ist = now + timedelta(hours=5, minutes=30)
+    weekday = ist.weekday() # Monday = 0
+    sun_index = (weekday + 1) % 7
+    if ist.hour < 6:
+        sun_index = (sun_index - 1) % 7 # Roll back to previous day if before 6 AM
+    return DAYS[sun_index], DAY_LORDS[sun_index]
+
+def get_live_ascendant(lat, lon):
+    now = datetime.now(timezone.utc)
+    jd_ut = swe.julday(now.year, now.month, now.day, now.hour + now.minute/60.0 + now.second/3600.0)
+    cusps, ascmc = swe.houses_ex(jd_ut, lat, lon, b'P', swe.FLG_SIDEREAL)
+    return ascmc[0]
 
 # --- THE MASTER PIPELINE ---
 def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
-    print("\n==================================================")
-    print("        KP HORARY ASTROLOGY ENGINE (V1.0)         ")
-    print("==================================================\n")
-
-    # --- [PHASE 1: THE SETUP] ---
-    print("--- [PHASE 1: THE SETUP] ---")
     lat, lon = get_coordinates(city)
     if not lat: return {"error": "Location not found."}
     
@@ -135,71 +153,43 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     target_asc = asc_data["ascendant_longitude"]
     horary_sub_lord = asc_data["sub_lord"]
     
-    print(f"Location Locked: {city} (Lat: {round(lat,2)}, Lon: {round(lon,2)})")
-    print(f"Horary #{horary_number}: Ascendant at {round(target_asc, 2)}°")
-    print(f"Horary Sub-Lord (The Decider): {horary_sub_lord}\n")
-
-    # --- [PHASE 2: THE CHART CASTING] ---
-    print("--- [PHASE 2: THE CHART CASTING] ---")
+    # 1. Cast the Horary Chart
     cusps = calculate_placidus_cusps(target_asc, lat, lon)
     planets, retrogrades = get_live_planets()
     planet_houses = {p: find_planet_house(lon_val, cusps) for p, lon_val in planets.items()}
     
-    print("12 Placidus House Cusps Generated.")
-    print("Live Transits Locked to Time of Judgment.\n")
-
-    # --- [PHASE 3: THE VALIDATION] ---
-    print("--- [PHASE 3: THE VALIDATION] ---")
-    moon_lon = planets["Moon"]
-    moon_star_lord = get_star_lord(moon_lon)
-    print(f"Moon's Star Lord is {moon_star_lord}.")
+    # 2. Run the Panchang & Ruling Planets (The "When" Engine)
+    live_asc = get_live_ascendant(lat, lon)
+    rp_asc_sign_lord = get_sign_lord(live_asc)
+    rp_asc_star_lord = get_star_lord(live_asc)
     
+    moon_lon = planets["Moon"]
+    moon_sign_lord = get_sign_lord(moon_lon)
+    moon_star_lord = get_star_lord(moon_lon)
+    
+    day_name, day_lord = get_current_day_lord()
+    current_tithi = get_panchang_tithi(planets["Sun"], moon_lon)
+    
+    # 3. Validation & Punarphoo
     saturn_lon = planets["Saturn"]
     dist = abs(moon_lon - saturn_lon)
     if dist > 180: dist = 360 - dist
     punarphoo_active = dist <= 3.33 
-    
-    if punarphoo_active:
-        print("!!! WARNING: PUNARPHOO DOSHA DETECTED (Saturn/Moon Conjunction) !!!")
-        print("The client's mind is highly anxious. Expect severe, unpredictable delays.")
-    print("System Check: If this matches the primary houses of the query, the chart is valid.\n")
 
-    # --- [PHASE 4: THE 4-STEP SIGNIFICATORS] ---
-    print("--- [PHASE 4: THE 4-STEP SIGNIFICATORS] ---")
+    # 4. 4-Step Significators
     sl_lon = planets[horary_sub_lord]
     sl_star_lord = get_star_lord(sl_lon)
     
     true_sl_star_lord = get_true_agent(sl_star_lord, planets)
     is_retrograde = retrogrades.get(true_sl_star_lord, False)
-    if is_retrograde:
-        print(f"!!! WARNING: The Star Lord ({true_sl_star_lord}) is RETROGRADE (Vakri) !!!")
     
     step_1_house = planet_houses[sl_star_lord]
     step_2_houses = get_houses_owned_by_planet(sl_star_lord, cusps, planets)
     step_3_house = planet_houses[horary_sub_lord]
     step_4_houses = get_houses_owned_by_planet(horary_sub_lord, cusps, planets)
 
-    print(f"Step 1 (Strongest): House {step_1_house} (Occupied by its Star Lord, {sl_star_lord})")
-    
-    if sl_star_lord in ["Rahu", "Ketu"]:
-        agent = get_true_agent(sl_star_lord, planets)
-        print(f"Step 2 (Strong): Houses {step_2_houses} (Stolen by {sl_star_lord} acting as agent for {agent})")
-    else:
-        print(f"Step 2 (Strong): Houses {step_2_houses} (Owned by {sl_star_lord})")
-        
-    print(f"Step 3 (Weak): House {step_3_house} (Occupied by {horary_sub_lord})")
-    
-    if horary_sub_lord in ["Rahu", "Ketu"]:
-        agent = get_true_agent(horary_sub_lord, planets)
-        print(f"Step 4 (Weakest): Houses {step_4_houses} (Stolen by {horary_sub_lord} acting as agent for {agent})\n")
-    else:
-        print(f"Step 4 (Weakest): Houses {step_4_houses} (Owned by {horary_sub_lord})\n")
-
-    # --- [THE FINAL DECISION ENGINE] ---
-    print("--- [THE FINAL DECISION ENGINE] ---")
-    
+    # 5. Scoring Engine
     score = 0
-    
     if step_1_house in positive_houses: score += 4
     elif step_1_house in negative_houses: score -= 4
         
@@ -231,11 +221,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     else:
         verdict = "NEUTRAL. The active houses do not indicate a clear win or loss."
         
-    print(f"Houses Signified: {list(set(all_signified_houses))}")
-    print(f"KP Math Score: {score}")
-    print(f"SYSTEM VERDICT: {verdict}")
-    print("==================================================\n")
-    
+    # 6. Build the Massive Return JSON
     return {
         "verdict": verdict,
         "kp_score": score,
@@ -243,14 +229,33 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
         "is_retrograde": is_retrograde,
         "all_houses": list(set(all_signified_houses)),
         "moon_star_lord": moon_star_lord,
-        "punarphoo": punarphoo_active
+        "punarphoo": punarphoo_active,
+        
+        # --- NEW DATA FOR APP.PY AND THE AI ---
+        "panchang": {
+            "day_name": day_name,
+            "tithi": current_tithi
+        },
+        "ruling_planets": {
+            "asc_sign_lord": rp_asc_sign_lord,
+            "asc_star_lord": rp_asc_star_lord,
+            "moon_sign_lord": moon_sign_lord,
+            "moon_star_lord": moon_star_lord,
+            "day_lord": day_lord
+        },
+        "chart_data": {
+            "cusps": list(cusps[1:]), # Strips the 0 index so it matches Houses 1-12
+            "planets": planets,
+            "planet_houses": planet_houses
+        }
     }
 
 if __name__ == "__main__":
     try:
         test_city = input("Enter City of Judgment: > ")
         test_num = int(input("Enter Horary Number (1-249): > "))
-        # Provide default positive/negative houses just for terminal testing
-        execute_kp_reading(test_city, test_num, [2, 11], [8, 12])
+        result = execute_kp_reading(test_city, test_num, [2, 11], [8, 12])
+        print(f"Panchang: {result['panchang']['day_name']} | {result['panchang']['tithi']}")
+        print(f"Ruling Planets: {result['ruling_planets']}")
     except Exception as e:
         print(f"An error occurred: {e}")

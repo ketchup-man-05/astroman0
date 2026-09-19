@@ -13,11 +13,10 @@ client = OpenAI(
 )
 
 # Active model on your Groq console
-MODEL_NAME = "openai/gpt-oss-120b"
+MODEL_NAME = "llama3-70b-8192"
 
 # Memory store for active sessions
 user_sessions = {}
-
 
 def get_query_houses(user_question):
     """Keyword router mapping questions to standard KP primary & secondary houses."""
@@ -40,20 +39,17 @@ def get_query_houses(user_question):
     elif any(word in text for word in ["court", "lawsuit", "litigation", "case", "legal", "dispute"]):
         return {"positive_houses": [6, 11], "negative_houses": [12]}
     else:
-        # Default for general queries / gains
         return {"positive_houses": [2, 11], "negative_houses": [8, 12]}
 
 
 def handle_incoming_message(user_id, user_message, city=None, horary_number=None):
     current_time = time.time()
 
-    # 1. Session expiration check (20 minutes = 1200 seconds)
     if user_id in user_sessions:
         time_elapsed = current_time - user_sessions[user_id]["last_active"]
         if time_elapsed > 1200:
             del user_sessions[user_id]
 
-    # 2. Scenario A: New Reading (or expired session restart)
     if user_id not in user_sessions:
         if not city or not horary_number:
             return "Your previous session ended. Please enter your question, city, and a Horary Number (1-249) to begin a new chart."
@@ -71,7 +67,8 @@ def handle_incoming_message(user_id, user_message, city=None, horary_number=None
             return "System Error: Unable to cast the chart. Please check the city name and Horary Number."
 
         initial_prompt = f"""
-You are an expert KP Horary Astrologer providing an analysis inside a web application.
+You are an elite, premium KP (Krishnamurti Paddhati) Horary Astrologer. 
+Your tone is highly professional, decisive, and clinical, similar to a high-end consultant.
 
 User Question: "{user_message}"
 Location: {city}
@@ -82,12 +79,25 @@ Chart Data (Raw KP Engine JSON):
 Target Positive Houses: {house_rules['positive_houses']}
 Target Negative Houses: {house_rules['negative_houses']}
 
-Formatting Guidelines:
-1. Provide a direct, definitive answer first (Yes, No, or Mixed) based strictly on the 'verdict' and 'kp_score' in the JSON data.
-2. Confirm the Horary Seed ({horary_number}) and Judgment Location ({city}).
-3. If 'punarphoo' is true in the data, note that the Moon-Saturn connection indicates initial delay, hesitation, or anxiety before the outcome.
-4. Detail the planetary significators and houses strictly as reported in the JSON. Do not fabricate house numbers, scores, or planetary strengths.
-5. End with an invitation to ask follow-up questions regarding this reading.
+You MUST structure your response in exactly four distinct sections using Markdown headers:
+
+### 1. The Verdict
+Give a definitive, bolded "YES", "NO", or "MIXED" based strictly on the 'verdict' and 'kp_score' in the JSON data. Do not be vague.
+
+### 2. Astrological Breakdown
+In 2 or 3 brief bullet points, explain the "why":
+- Detail the specific planetary significators, sub-lords, and houses as reported in the JSON.
+- If 'punarphoo' is true, note that the Moon-Saturn connection indicates initial delay, hesitation, or anxiety before the outcome.
+
+### 3. Timing of the Event (The 'When')
+Using the 'ruling_planets' data provided in the JSON (Ascendant Lord, Moon Lord, Day Lord) and the current Panchang data, provide a brief estimate of WHEN this event is most likely to occur or when the energetic window opens. If the verdict is NO, state that the current planetary periods do not support a timeline for success.
+
+### 4. Remedy & Action Protocol
+Provide a highly practical, actionable piece of advice based on the verdict:
+- If NO: Give a behavioral remedy to mitigate the failure.
+- If YES: Give an action to secure the win.
+
+Do not include any introductory filler text. End by inviting follow-up questions.
 """
 
         messages = [{"role": "user", "content": initial_prompt}]
@@ -95,13 +105,12 @@ Formatting Guidelines:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            temperature=0.2
+            temperature=0.2 
         )
 
         ai_reply = response.choices[0].message.content
         messages.append({"role": "assistant", "content": ai_reply})
 
-        # Save session context
         user_sessions[user_id] = {
             "messages": messages,
             "chart_data": chart_data,
@@ -111,7 +120,6 @@ Formatting Guidelines:
 
         return ai_reply
 
-    # 3. Scenario B: Follow-up Questions on the same chart
     else:
         user_data = user_sessions[user_id]
 
@@ -129,7 +137,7 @@ Reference Chart Data:
 {json.dumps(chart_data, indent=2)}
 
 Instructions:
-Answer this question strictly using the astrological positions, sub-lords, and house significators from this specific cast chart. Do not give generic astrology generalizations.
+Answer this question strictly using the astrological positions, sub-lords, and house significators from this specific cast chart. Do not give generic astrology generalizations. Maintain your professional, premium consultant tone.
 """
         messages.append({"role": "user", "content": follow_up_prompt})
 
