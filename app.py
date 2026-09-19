@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import urllib.parse
-import uuid  # <-- NEW: Needed for unique user IDs
+import uuid  # <-- Needed for unique user IDs
 import ai_narrator
 import chart_caster
 
@@ -16,6 +16,12 @@ st.markdown("""
         background-color: #F7F7F9;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
+    
+    /* THE FIX: Force all headings, paragraphs, and labels to be dark */
+    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, div[data-testid="stMarkdownContainer"] p {
+        color: #1C1C1E !important;
+    }
+    
     header {visibility: hidden;}
     
     /* Clean rounded input boxes */
@@ -75,7 +81,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. Initialize Session State Variables
-# --- NEW: Multiplayer and Chat Variables ---
+# --- Multiplayer and Chat Variables ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 if "chat_history" not in st.session_state:
