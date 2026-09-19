@@ -1,74 +1,76 @@
 import streamlit as st
 import time
 import urllib.parse
-import uuid  # <-- Needed for unique user IDs
+import uuid
 import ai_narrator
 import chart_caster
 
 # 1. Page Configuration
 st.set_page_config(page_title="Astroman AI - KP Horary", page_icon="✨", layout="centered")
 
-# 2. Injecting the Clean Minimalist Apple-Style CSS
+# 2. Injecting the "Cosmic Midnight" CSS
 st.markdown("""
 <style>
-    /* Main Background & Typography */
+    /* Deep space slate background */
     .stApp {
-        background-color: #F7F7F9;
+        background-color: #0F172A;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     
-    /* THE FIX: Force all headings, paragraphs, and labels to be dark */
+    /* Force all text to crisp white/light gray */
     h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, div[data-testid="stMarkdownContainer"] p {
-        color: #1C1C1E !important;
+        color: #F8FAFC !important;
     }
     
     header {visibility: hidden;}
     
-    /* Clean rounded input boxes */
+    /* Dark, glowing input boxes */
     .stTextInput input, .stNumberInput input {
         border-radius: 12px !important;
-        border: 1px solid #E0E0E6 !important;
-        background-color: #FFFFFF !important;
-        color: #1C1C1E !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+        border: 1px solid #334155 !important;
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.2) !important;
     }
     
-    /* Primary action buttons */
+    /* Cosmic Blue action buttons with glow */
     .stButton > button, .stDownloadButton > button {
-        background-color: #007AFF !important;
+        background-color: #3B82F6 !important;
         color: white !important;
         border-radius: 20px !important;
-        border: none !important;
+        border: 1px solid #60A5FA !important;
         font-weight: 600 !important;
         padding: 8px 24px !important;
-        transition: all 0.2s ease;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3) !important;
     }
     .stButton > button:hover, .stDownloadButton > button:hover {
-        background-color: #005BB5 !important;
-        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3) !important;
+        background-color: #2563EB !important;
+        box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5) !important;
+        transform: translateY(-1px);
     }
 
-    /* Kundli Chart CSS for South Indian */
+    /* Dark Mode South Indian Kundli Grid */
     .kundli-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         grid-template-rows: repeat(4, 80px);
         gap: 2px;
-        background-color: #1C1C1E;
-        border: 2px solid #1C1C1E;
+        background-color: #475569;
+        border: 2px solid #475569;
         border-radius: 8px;
         margin-bottom: 20px;
     }
     .kundli-box {
-        background-color: #FFFFFF;
+        background-color: #0F172A;
         padding: 4px;
         font-size: 11px;
         font-weight: 600;
-        color: #333;
+        color: #E2E8F0;
         overflow: hidden;
     }
     .kundli-empty {
-        background-color: #F7F7F9;
+        background-color: #1E293B;
     }
     
     /* Center the toggle options */
@@ -77,11 +79,17 @@ st.markdown("""
         justify-content: center;
         margin-bottom: 10px;
     }
+    
+    /* Style the info boxes */
+    .stAlert {
+        background-color: #1E293B !important;
+        border: 1px solid #334155 !important;
+        color: #F8FAFC !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # 3. Initialize Session State Variables
-# --- Multiplayer and Chat Variables ---
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 if "chat_history" not in st.session_state:
@@ -96,13 +104,18 @@ if "reading_result" not in st.session_state:
 if "cosmic_number" not in st.session_state:
     st.session_state.cosmic_number = 45
 
-# --- HELPER FUNCTIONS: DRAW VISUAL KUNDLI ---
+# --- NEW: Safely store chart data in frontend memory ---
+if "raw_planets" not in st.session_state:
+    st.session_state.raw_planets = None
+if "raw_ascendant" not in st.session_state:
+    st.session_state.raw_ascendant = None
+
+# --- HELPER FUNCTIONS: DRAW VISUAL KUNDLI (DARK MODE) ---
 
 def draw_north_indian_chart(planets_dict, ascendant_lon):
-    """Generates an SVG North Indian style diamond chart based on Ascendant and planetary longitudes."""
+    """Generates an SVG North Indian style diamond chart for Dark Mode."""
     asc_sign = int(ascendant_lon // 30)
     
-    # Map planets to houses (House 1 = Ascendant)
     house_planets = {h: [] for h in range(1, 13)}
     for p, lon in planets_dict.items():
         p_sign = int(lon // 30)
@@ -114,54 +127,54 @@ def draw_north_indian_chart(planets_dict, ascendant_lon):
         
     svg = f"""
     <div style="display:flex; justify-content:center; margin-bottom: 20px;">
-        <svg viewBox="0 0 400 400" width="100%" max-width="400px" style="background-color: #FFFFFF; border: 2px solid #1C1C1E; border-radius: 8px;">
-            <rect x="0" y="0" width="400" height="400" fill="none" stroke="#1C1C1E" stroke-width="2"/>
-            <line x1="0" y1="0" x2="400" y2="400" stroke="#1C1C1E" stroke-width="2"/>
-            <line x1="400" y1="0" x2="0" y2="400" stroke="#1C1C1E" stroke-width="2"/>
-            <polygon points="200,0 400,200 200,400 0,200" fill="none" stroke="#1C1C1E" stroke-width="2"/>
+        <svg viewBox="0 0 400 400" width="100%" max-width="400px" style="background-color: #1E293B; border: 2px solid #475569; border-radius: 8px;">
+            <rect x="0" y="0" width="400" height="400" fill="none" stroke="#64748B" stroke-width="2"/>
+            <line x1="0" y1="0" x2="400" y2="400" stroke="#64748B" stroke-width="2"/>
+            <line x1="400" y1="0" x2="0" y2="400" stroke="#64748B" stroke-width="2"/>
+            <polygon points="200,0 400,200 200,400 0,200" fill="none" stroke="#64748B" stroke-width="2"/>
             
-            <text x="200" y="110" text-anchor="middle" font-size="14" font-weight="bold" fill="#007AFF">{get_txt(1)}</text>
-            <text x="200" y="25" text-anchor="middle" font-size="11" fill="#888">{get_num(1)}</text>
+            <text x="200" y="110" text-anchor="middle" font-size="14" font-weight="bold" fill="#60A5FA">{get_txt(1)}</text>
+            <text x="200" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(1)}</text>
             
-            <text x="100" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(2)}</text>
-            <text x="175" y="25" text-anchor="middle" font-size="11" fill="#888">{get_num(2)}</text>
+            <text x="100" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(2)}</text>
+            <text x="175" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(2)}</text>
             
-            <text x="60" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(3)}</text>
-            <text x="20" y="175" text-anchor="middle" font-size="11" fill="#888">{get_num(3)}</text>
+            <text x="60" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(3)}</text>
+            <text x="20" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(3)}</text>
             
-            <text x="110" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">{get_txt(4)}</text>
-            <text x="20" y="200" text-anchor="middle" font-size="11" fill="#888">{get_num(4)}</text>
+            <text x="110" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(4)}</text>
+            <text x="20" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(4)}</text>
             
-            <text x="60" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(5)}</text>
-            <text x="20" y="225" text-anchor="middle" font-size="11" fill="#888">{get_num(5)}</text>
+            <text x="60" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(5)}</text>
+            <text x="20" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(5)}</text>
             
-            <text x="100" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(6)}</text>
-            <text x="175" y="385" text-anchor="middle" font-size="11" fill="#888">{get_num(6)}</text>
+            <text x="100" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(6)}</text>
+            <text x="175" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(6)}</text>
             
-            <text x="200" y="310" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">{get_txt(7)}</text>
-            <text x="200" y="385" text-anchor="middle" font-size="11" fill="#888">{get_num(7)}</text>
+            <text x="200" y="310" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(7)}</text>
+            <text x="200" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(7)}</text>
             
-            <text x="300" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(8)}</text>
-            <text x="225" y="385" text-anchor="middle" font-size="11" fill="#888">{get_num(8)}</text>
+            <text x="300" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(8)}</text>
+            <text x="225" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(8)}</text>
             
-            <text x="350" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(9)}</text>
-            <text x="385" y="225" text-anchor="middle" font-size="11" fill="#888">{get_num(9)}</text>
+            <text x="350" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(9)}</text>
+            <text x="385" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(9)}</text>
             
-            <text x="290" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">{get_txt(10)}</text>
-            <text x="385" y="200" text-anchor="middle" font-size="11" fill="#888">{get_num(10)}</text>
+            <text x="290" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(10)}</text>
+            <text x="385" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(10)}</text>
             
-            <text x="350" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(11)}</text>
-            <text x="385" y="175" text-anchor="middle" font-size="11" fill="#888">{get_num(11)}</text>
+            <text x="350" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(11)}</text>
+            <text x="385" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(11)}</text>
             
-            <text x="300" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">{get_txt(12)}</text>
-            <text x="225" y="25" text-anchor="middle" font-size="11" fill="#888">{get_num(12)}</text>
+            <text x="300" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(12)}</text>
+            <text x="225" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(12)}</text>
         </svg>
     </div>
     """
     return svg
 
 def draw_south_indian_chart(planets_dict):
-    """Generates an HTML South Indian style chart grid based on planetary longitudes."""
+    """Generates an HTML South Indian style chart grid for Dark Mode."""
     sign_placements = {i: [] for i in range(12)}
     for planet, lon in planets_dict.items():
         sign = int(lon // 30)
@@ -174,7 +187,7 @@ def draw_south_indian_chart(planets_dict):
     html = f"""
     <div class="kundli-grid">
         {box(11)} {box(0)} {box(1)} {box(2)}
-        {box(10)} <div class="kundli-box kundli-empty" style="grid-column: span 2; grid-row: span 2; display:flex; align-items:center; justify-content:center; font-size:14px; color:#aaa;">Rasi Chart</div> {box(3)}
+        {box(10)} <div class="kundli-box kundli-empty" style="grid-column: span 2; grid-row: span 2; display:flex; align-items:center; justify-content:center; font-size:14px; color:#94A3B8;">Rasi Chart</div> {box(3)}
         {box(9)} {box(4)}
         {box(8)} {box(7)} {box(6)} {box(5)}
     </div>
@@ -219,7 +232,6 @@ if submitted:
     if not question or not city:
         st.error("Please fill in both your question and city.")
     else:
-        # Clear chat history on a new query
         st.session_state.chat_history = [] 
         
         with st.status("🌌 Consulting the Stars...", expanded=True) as status:
@@ -234,10 +246,13 @@ if submitted:
                 st.session_state.user_city = city
                 st.session_state.cosmic_number = horary_number
                 
-                # --- UPDATE: Uses the unique user session ID ---
                 reply = ai_narrator.handle_incoming_message(
                     st.session_state.session_id, question, city, int(horary_number)
                 )
+                
+                # Save the chart data directly into the frontend memory so the toggle works
+                st.session_state.raw_planets = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
+                st.session_state.raw_ascendant = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
                 
                 st.session_state.reading_result = reply
                 st.session_state.reading_done = True
@@ -252,22 +267,14 @@ if st.session_state.reading_done:
     st.markdown("### 📜 Your Cosmic Reading")
     
     # Feature: Visual Kundli Chart Toggle
-    try:
-        # --- UPDATE: Pulls data from the specific user's unique session ---
-        raw_chart_data = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
-        raw_cusps = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"]
-        ascendant_lon = raw_cusps[0]
-        
+    if st.session_state.raw_planets and st.session_state.raw_ascendant is not None:
         chart_style = st.radio("Chart Style", ["North Indian", "South Indian"], horizontal=True, label_visibility="collapsed")
         
         if chart_style == "North Indian":
-            st.markdown(draw_north_indian_chart(raw_chart_data, ascendant_lon), unsafe_allow_html=True)
+            st.markdown(draw_north_indian_chart(st.session_state.raw_planets, st.session_state.raw_ascendant), unsafe_allow_html=True)
         else:
-            st.markdown(draw_south_indian_chart(raw_chart_data), unsafe_allow_html=True)
-    except Exception as e:
-        pass 
+            st.markdown(draw_south_indian_chart(st.session_state.raw_planets), unsafe_allow_html=True)
     
-    # Display the AI's response
     st.write(st.session_state.reading_result)
     st.markdown("---")
     
@@ -282,7 +289,6 @@ if st.session_state.reading_done:
         
     st.markdown("---")
     
-    # --- NEW: FOLLOW-UP CHAT UI ---
     st.markdown("### 💬 Ask a Follow-up Question")
     
     for chat in st.session_state.chat_history:
