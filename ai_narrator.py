@@ -13,7 +13,7 @@ client = OpenAI(
 )
 
 # Active model on your Groq console
-MODEL_NAME = "llama3-70b-8192"
+MODEL_NAME = "openai/gpt-oss-120b"
 
 # Memory store for active sessions
 user_sessions = {}
