@@ -250,9 +250,14 @@ if submitted:
                     st.session_state.session_id, question, city, int(horary_number)
                 )
                 
-                # Save the chart data directly into the frontend memory so the toggle works
-                st.session_state.raw_planets = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
-                st.session_state.raw_ascendant = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
+                # --- THE FIX: Only try to draw the chart if the AI successfully saved it to memory ---
+                if st.session_state.session_id in ai_narrator.user_sessions:
+                    st.session_state.raw_planets = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
+                    st.session_state.raw_ascendant = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
+                else:
+                    # If it failed (e.g. fake city), clear the chart data so it doesn't draw an empty box
+                    st.session_state.raw_planets = None
+                    st.session_state.raw_ascendant = None
                 
                 st.session_state.reading_result = reply
                 st.session_state.reading_done = True

@@ -13,7 +13,7 @@ client = OpenAI(
 )
 
 # Active model on your Groq console
-MODEL_NAME = "openai/gpt-oss-120b"
+MODEL_NAME = "gpt-oss-120b"
 
 # Memory store for active sessions
 user_sessions = {}
@@ -41,7 +41,6 @@ def get_query_houses(user_question):
     else:
         return {"positive_houses": [2, 11], "negative_houses": [8, 12]}
 
-
 def handle_incoming_message(user_id, user_message, city=None, horary_number=None):
     current_time = time.time()
 
@@ -67,37 +66,33 @@ def handle_incoming_message(user_id, user_message, city=None, horary_number=None
             return "System Error: Unable to cast the chart. Please check the city name and Horary Number."
 
         initial_prompt = f"""
-You are an elite, premium KP (Krishnamurti Paddhati) Horary Astrologer. 
-Your tone is highly professional, decisive, and clinical, similar to a high-end consultant.
+You are an elite, highly clinical KP (Krishnamurti Paddhati) Astrologer. Your job is to act as a strict mathematical interpreter of the provided KP Horary data.
 
 User Question: "{user_message}"
 Location: {city}
 Horary Number: {horary_number}
+
 Chart Data (Raw KP Engine JSON):
 {json.dumps(chart_data, indent=2)}
 
 Target Positive Houses: {house_rules['positive_houses']}
 Target Negative Houses: {house_rules['negative_houses']}
 
-You MUST structure your response in exactly four distinct sections using Markdown headers:
+You MUST structure your response in exactly two distinct sections using Markdown headers:
 
 ### 1. The Verdict
-Give a definitive, bolded "YES", "NO", or "MIXED" based strictly on the 'verdict' and 'kp_score' in the JSON data. Do not be vague.
+Give a definitive, bolded "YES", "NO", or "MIXED" based strictly on the 'verdict' and 'kp_score' in the JSON data. 
+You MUST explicitly state the final KP Score (e.g., "Final KP Score: {chart_data.get('kp_score', 0)}"). Do not soften the blow. Be direct.
 
-### 2. Astrological Breakdown
-In 2 or 3 brief bullet points, explain the "why":
-- Detail the specific planetary significators, sub-lords, and houses as reported in the JSON.
-- If 'punarphoo' is true, note that the Moon-Saturn connection indicates initial delay, hesitation, or anxiety before the outcome.
+### 2. KP Mathematical Breakdown
+Explain the exact math that led to this score using the 4-Step Significator theory present in the JSON.
+- Detail the specific Sub-Lord.
+- Explain which houses were signified in Step 1 (Star Lord occupation), Step 2 (Star Lord ownership), Step 3 (Sub Lord occupation), and Step 4 (Sub Lord ownership).
+- Compare how these signified houses map against the Target Positive and Target Negative houses.
+- If 'is_retrograde' is true, explicitly state that the Retrograde Star Lord denies the event entirely, regardless of the score.
+- If 'punarphoo' is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
 
-### 3. Timing of the Event (The 'When')
-Using the 'ruling_planets' data provided in the JSON (Ascendant Lord, Moon Lord, Day Lord) and the current Panchang data, provide a brief estimate of WHEN this event is most likely to occur or when the energetic window opens. If the verdict is NO, state that the current planetary periods do not support a timeline for success.
-
-### 4. Remedy & Action Protocol
-Provide a highly practical, actionable piece of advice based on the verdict:
-- If NO: Give a behavioral remedy to mitigate the failure.
-- If YES: Give an action to secure the win.
-
-Do not include any introductory filler text. End by inviting follow-up questions.
+DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly to the mathematical proof of the chart. End by asking if they have questions about the calculation.
 """
 
         messages = [{"role": "user", "content": initial_prompt}]
@@ -105,7 +100,7 @@ Do not include any introductory filler text. End by inviting follow-up questions
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            temperature=0.2 
+            temperature=0.1 # Dropped even lower to ensure strict adherence to the math
         )
 
         ai_reply = response.choices[0].message.content
@@ -137,14 +132,14 @@ Reference Chart Data:
 {json.dumps(chart_data, indent=2)}
 
 Instructions:
-Answer this question strictly using the astrological positions, sub-lords, and house significators from this specific cast chart. Do not give generic astrology generalizations. Maintain your professional, premium consultant tone.
+Answer this question strictly using the mathematical astrological positions, sub-lords, and house significators from this specific cast chart. Do not give generic astrology generalizations. Maintain a clinical, mathematical tone.
 """
         messages.append({"role": "user", "content": follow_up_prompt})
 
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            temperature=0.2
+            temperature=0.1
         )
 
         ai_reply = response.choices[0].message.content
