@@ -125,52 +125,8 @@ def draw_north_indian_chart(planets_dict, ascendant_lon):
     def get_txt(h): return ", ".join(house_planets[h])
     def get_num(h): return (asc_sign + h - 1) % 12 + 1
         
-    svg = f"""
-    <div style="display:flex; justify-content:center; margin-bottom: 20px;">
-        <svg viewBox="0 0 400 400" width="100%" max-width="400px" style="background-color: #1E293B; border: 2px solid #475569; border-radius: 8px;">
-            <rect x="0" y="0" width="400" height="400" fill="none" stroke="#64748B" stroke-width="2"/>
-            <line x1="0" y1="0" x2="400" y2="400" stroke="#64748B" stroke-width="2"/>
-            <line x1="400" y1="0" x2="0" y2="400" stroke="#64748B" stroke-width="2"/>
-            <polygon points="200,0 400,200 200,400 0,200" fill="none" stroke="#64748B" stroke-width="2"/>
-            
-            <text x="200" y="110" text-anchor="middle" font-size="14" font-weight="bold" fill="#60A5FA">{get_txt(1)}</text>
-            <text x="200" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(1)}</text>
-            
-            <text x="100" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(2)}</text>
-            <text x="175" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(2)}</text>
-            
-            <text x="60" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(3)}</text>
-            <text x="20" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(3)}</text>
-            
-            <text x="110" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(4)}</text>
-            <text x="20" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(4)}</text>
-            
-            <text x="60" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(5)}</text>
-            <text x="20" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(5)}</text>
-            
-            <text x="100" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(6)}</text>
-            <text x="175" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(6)}</text>
-            
-            <text x="200" y="310" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(7)}</text>
-            <text x="200" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(7)}</text>
-            
-            <text x="300" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(8)}</text>
-            <text x="225" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(8)}</text>
-            
-            <text x="350" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(9)}</text>
-            <text x="385" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(9)}</text>
-            
-            <text x="290" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(10)}</text>
-            <text x="385" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(10)}</text>
-            
-            <text x="350" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(11)}</text>
-            <text x="385" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(11)}</text>
-            
-            <text x="300" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(12)}</text>
-            <text x="225" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(12)}</text>
-        </svg>
-    </div>
-    """
+    # THE FIX: Compressed the entire SVG into a single, unbreakable line so Streamlit renders it as an image.
+    svg = f"""<div style="display:flex; justify-content:center; margin-bottom: 20px;"><svg viewBox="0 0 400 400" width="100%" max-width="400px" style="background-color: #1E293B; border: 2px solid #475569; border-radius: 8px;"><rect x="0" y="0" width="400" height="400" fill="none" stroke="#64748B" stroke-width="2"/><line x1="0" y1="0" x2="400" y2="400" stroke="#64748B" stroke-width="2"/><line x1="400" y1="0" x2="0" y2="400" stroke="#64748B" stroke-width="2"/><polygon points="200,0 400,200 200,400 0,200" fill="none" stroke="#64748B" stroke-width="2"/><text x="200" y="110" text-anchor="middle" font-size="14" font-weight="bold" fill="#60A5FA">{get_txt(1)}</text><text x="200" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(1)}</text><text x="100" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(2)}</text><text x="175" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(2)}</text><text x="60" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(3)}</text><text x="20" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(3)}</text><text x="110" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(4)}</text><text x="20" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(4)}</text><text x="60" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(5)}</text><text x="20" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(5)}</text><text x="100" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(6)}</text><text x="175" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(6)}</text><text x="200" y="310" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(7)}</text><text x="200" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(7)}</text><text x="300" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(8)}</text><text x="225" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(8)}</text><text x="350" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(9)}</text><text x="385" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(9)}</text><text x="290" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(10)}</text><text x="385" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(10)}</text><text x="350" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(11)}</text><text x="385" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(11)}</text><text x="300" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(12)}</text><text x="225" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(12)}</text></svg></div>"""
     return svg
 
 def draw_south_indian_chart(planets_dict):
@@ -184,14 +140,7 @@ def draw_south_indian_chart(planets_dict):
         planets = ", ".join(sign_placements[sign_idx])
         return f'<div class="kundli-box">{planets}</div>'
 
-    html = f"""
-    <div class="kundli-grid">
-        {box(11)} {box(0)} {box(1)} {box(2)}
-        {box(10)} <div class="kundli-box kundli-empty" style="grid-column: span 2; grid-row: span 2; display:flex; align-items:center; justify-content:center; font-size:14px; color:#94A3B8;">Rasi Chart</div> {box(3)}
-        {box(9)} {box(4)}
-        {box(8)} {box(7)} {box(6)} {box(5)}
-    </div>
-    """
+    html = f"""<div class="kundli-grid">{box(11)} {box(0)} {box(1)} {box(2)}{box(10)} <div class="kundli-box kundli-empty" style="grid-column: span 2; grid-row: span 2; display:flex; align-items:center; justify-content:center; font-size:14px; color:#94A3B8;">Rasi Chart</div> {box(3)}{box(9)} {box(4)}{box(8)} {box(7)} {box(6)} {box(5)}</div>"""
     return html
 
 # 4. Main App UI
@@ -250,12 +199,11 @@ if submitted:
                     st.session_state.session_id, question, city, int(horary_number)
                 )
                 
-                # --- THE FIX: Only try to draw the chart if the AI successfully saved it to memory ---
+                # Save the chart data directly into the frontend memory so the toggle works
                 if st.session_state.session_id in ai_narrator.user_sessions:
                     st.session_state.raw_planets = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
                     st.session_state.raw_ascendant = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
                 else:
-                    # If it failed (e.g. fake city), clear the chart data so it doesn't draw an empty box
                     st.session_state.raw_planets = None
                     st.session_state.raw_ascendant = None
                 
@@ -275,10 +223,13 @@ if st.session_state.reading_done:
     if st.session_state.raw_planets and st.session_state.raw_ascendant is not None:
         chart_style = st.radio("Chart Style", ["North Indian", "South Indian"], horizontal=True, label_visibility="collapsed")
         
-        if chart_style == "North Indian":
-            st.markdown(draw_north_indian_chart(st.session_state.raw_planets, st.session_state.raw_ascendant), unsafe_allow_html=True)
-        else:
-            st.markdown(draw_south_indian_chart(st.session_state.raw_planets), unsafe_allow_html=True)
+        try:
+            if chart_style == "North Indian":
+                st.markdown(draw_north_indian_chart(st.session_state.raw_planets, st.session_state.raw_ascendant), unsafe_allow_html=True)
+            else:
+                st.markdown(draw_south_indian_chart(st.session_state.raw_planets), unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"Failed to render chart: {e}")
     
     st.write(st.session_state.reading_result)
     st.markdown("---")

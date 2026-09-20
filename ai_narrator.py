@@ -71,39 +71,44 @@ You are an elite, highly clinical KP (Krishnamurti Paddhati) Astrologer. Your jo
 User Question: "{user_message}"
 Location: {city}
 Horary Number: {horary_number}
+Target Positive Houses: {house_rules['positive_houses']}
+Target Negative Houses: {house_rules['negative_houses']}
 
 Chart Data (Raw KP Engine JSON):
 {json.dumps(chart_data, indent=2)}
 
-Target Positive Houses: {house_rules['positive_houses']}
-Target Negative Houses: {house_rules['negative_houses']}
-
 You MUST structure your response in exactly two distinct sections using Markdown headers:
 
 ### 1. The Verdict
-Give a definitive, bolded "YES", "NO", or "MIXED" based strictly on the 'verdict' and 'kp_score' in the JSON data. 
-You MUST explicitly state the final KP Score (e.g., "Final KP Score: {chart_data.get('kp_score', 0)}"). Do not soften the blow. Be direct.
+Give a definitive, bolded "YES", "NO", or "MIXED". 
+You MUST explicitly state the final KP Score by reading the exact 'kp_score' value from the JSON data. Format it exactly like this: "Final KP Score: [Insert Score Here]". Do not guess or output 0 unless the JSON actually says 0.
 
 ### 2. KP Mathematical Breakdown
-Explain the exact math that led to this score using the 4-Step Significator theory present in the JSON.
-- Detail the specific Sub-Lord.
-- Explain which houses were signified in Step 1 (Star Lord occupation), Step 2 (Star Lord ownership), Step 3 (Sub Lord occupation), and Step 4 (Sub Lord ownership).
-- Compare how these signified houses map against the Target Positive and Target Negative houses.
+Explain the exact math that led to this score by matching the houses in the 4 Steps against the Target Positive and Negative houses. Be transparent about why points were awarded or NOT awarded.
+- Step 1 (Star Lord Occupation)
+- Step 2 (Star Lord Ownership)
+- Step 3 (Sub Lord Occupation)
+- Step 4 (Sub Lord Ownership)
+If a house was neutral (not in the positive/negative lists), explicitly state that it received 0 points.
 - If 'is_retrograde' is true, explicitly state that the Retrograde Star Lord denies the event entirely, regardless of the score.
 - If 'punarphoo' is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
 
-DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly to the mathematical proof of the chart. End by asking if they have questions about the calculation.
+DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly to the mathematical proof of the chart.
 """
 
         messages = [{"role": "user", "content": initial_prompt}]
 
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=0.1 # Dropped even lower to ensure strict adherence to the math
-        )
+        # THE FIX: Safety net for Scenario A
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.1 
+            )
+            ai_reply = response.choices[0].message.content
+        except Exception as e:
+            return "System Error: The AI Oracle is currently experiencing high traffic. Please wait 10 seconds and try clicking 'Cast Horary Chart & Analyze' again."
 
-        ai_reply = response.choices[0].message.content
         messages.append({"role": "assistant", "content": ai_reply})
 
         user_sessions[user_id] = {
@@ -132,17 +137,23 @@ Reference Chart Data:
 {json.dumps(chart_data, indent=2)}
 
 Instructions:
-Answer this question strictly using the mathematical astrological positions, sub-lords, and house significators from this specific cast chart. Do not give generic astrology generalizations. Maintain a clinical, mathematical tone.
+Answer this question strictly using the mathematical positions from this chart. Do not give generalizations. Maintain a clinical, mathematical tone.
 """
         messages.append({"role": "user", "content": follow_up_prompt})
 
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=0.1
-        )
+        # THE FIX: Safety net for Scenario B
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                temperature=0.1
+            )
+            ai_reply = response.choices[0].message.content
+        except Exception as e:
+            # We pop the failed prompt off the memory stack so the user can try asking it again
+            messages.pop() 
+            return "System Error: The AI Oracle is currently experiencing high traffic. Please try asking your follow-up question again in a few seconds."
 
-        ai_reply = response.choices[0].message.content
         messages.append({"role": "assistant", "content": ai_reply})
 
         user_data["count"] += 1

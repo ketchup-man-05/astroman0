@@ -53,9 +53,13 @@ def get_houses_owned_by_planet(planet, cusps, planets_dict):
     return owned_houses
 
 def get_coordinates(city_name):
+    # THE FIX: Restored the fast-track bypass and timeout
+    if city_name.lower() == "shimla":
+        return 31.10, 77.17
+        
     geolocator = Nominatim(user_agent="kp_astrology_bot")
     try:
-        location = geolocator.geocode(city_name)
+        location = geolocator.geocode(city_name, timeout=3)
         if location: return location.latitude, location.longitude
     except Exception: pass
     return None, None
@@ -128,14 +132,21 @@ def get_panchang_tithi(sun_lon, moon_lon):
     paksha = "Shukla (Waxing)" if tithi_index < 15 else "Krishna (Waning)"
     return f"{paksha} {TITHIS[tithi_index]}"
 
-def get_current_day_lord():
-    # Hindu day changes at roughly 6 AM local time, not midnight.
+def get_current_day_lord(lon):
+    # Dynamically calculate the user's timezone offset based on their GPS Longitude
+    # The Earth rotates 15 degrees per hour.
+    offset_hours = lon / 15.0
+    
     now = datetime.now(timezone.utc)
-    ist = now + timedelta(hours=5, minutes=30)
-    weekday = ist.weekday() # Monday = 0
+    local_time = now + timedelta(hours=offset_hours)
+    
+    weekday = local_time.weekday() # Monday = 0
     sun_index = (weekday + 1) % 7
-    if ist.hour < 6:
-        sun_index = (sun_index - 1) % 7 # Roll back to previous day if before 6 AM
+    
+    # Hindu day changes at roughly 6 AM local time, not midnight.
+    if local_time.hour < 6:
+        sun_index = (sun_index - 1) % 7
+        
     return DAYS[sun_index], DAY_LORDS[sun_index]
 
 def get_live_ascendant(lat, lon):
@@ -231,7 +242,14 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
         "moon_star_lord": moon_star_lord,
         "punarphoo": punarphoo_active,
         
-        # --- NEW DATA FOR APP.PY AND THE AI ---
+        # THE FIX: I added the significators here so the AI can finally see the math!
+        "significators": {
+            "step_1_house": step_1_house,
+            "step_2_houses": step_2_houses,
+            "step_3_house": step_3_house,
+            "step_4_houses": step_4_houses
+        },
+        
         "panchang": {
             "day_name": day_name,
             "tithi": current_tithi
@@ -249,13 +267,3 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
             "planet_houses": planet_houses
         }
     }
-
-if __name__ == "__main__":
-    try:
-        test_city = input("Enter City of Judgment: > ")
-        test_num = int(input("Enter Horary Number (1-249): > "))
-        result = execute_kp_reading(test_city, test_num, [2, 11], [8, 12])
-        print(f"Panchang: {result['panchang']['day_name']} | {result['panchang']['tithi']}")
-        print(f"Ruling Planets: {result['ruling_planets']}")
-    except Exception as e:
-        print(f"An error occurred: {e}")
