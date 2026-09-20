@@ -157,6 +157,10 @@ def get_live_ascendant(lat, lon):
 
 # --- THE MASTER PIPELINE ---
 def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
+    # THE FIX: Force incoming houses to integers to prevent the "0 score" string mismatch bug.
+    positive_houses = [int(h) for h in positive_houses]
+    negative_houses = [int(h) for h in negative_houses]
+
     lat, lon = get_coordinates(city)
     if not lat: return {"error": "Location not found."}
     
@@ -178,7 +182,8 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     moon_sign_lord = get_sign_lord(moon_lon)
     moon_star_lord = get_star_lord(moon_lon)
     
-    day_name, day_lord = get_current_day_lord()
+    # THE FIX: Passed 'lon' argument here so the function doesn't crash on execution.
+    day_name, day_lord = get_current_day_lord(lon)
     current_tithi = get_panchang_tithi(planets["Sun"], moon_lon)
     
     # 3. Validation & Punarphoo

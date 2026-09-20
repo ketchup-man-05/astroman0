@@ -15,8 +15,9 @@ client = OpenAI(
 # Active model on your Groq console
 MODEL_NAME = "openai/gpt-oss-120b"
 
-# Memory store for active sessions
-user_sessions = {}
+# THE FIX: Use Streamlit's session state to prevent the dictionary from resetting on every click
+if "user_sessions" not in st.session_state:
+    st.session_state.user_sessions = {}
 
 def get_query_houses(user_question):
     """Keyword router mapping questions to standard KP primary & secondary houses."""
@@ -44,12 +45,13 @@ def get_query_houses(user_question):
 def handle_incoming_message(user_id, user_message, city=None, horary_number=None):
     current_time = time.time()
 
-    if user_id in user_sessions:
-        time_elapsed = current_time - user_sessions[user_id]["last_active"]
+    # THE FIX: Replace 'user_sessions' with 'st.session_state.user_sessions' throughout
+    if user_id in st.session_state.user_sessions:
+        time_elapsed = current_time - st.session_state.user_sessions[user_id]["last_active"]
         if time_elapsed > 1200:
-            del user_sessions[user_id]
+            del st.session_state.user_sessions[user_id]
 
-    if user_id not in user_sessions:
+    if user_id not in st.session_state.user_sessions:
         if not city or not horary_number:
             return "Your previous session ended. Please enter your question, city, and a Horary Number (1-249) to begin a new chart."
 
@@ -98,7 +100,6 @@ DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly
 
         messages = [{"role": "user", "content": initial_prompt}]
 
-        # THE FIX: Safety net for Scenario A
         try:
             response = client.chat.completions.create(
                 model=MODEL_NAME,
@@ -111,7 +112,7 @@ DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly
 
         messages.append({"role": "assistant", "content": ai_reply})
 
-        user_sessions[user_id] = {
+        st.session_state.user_sessions[user_id] = {
             "messages": messages,
             "chart_data": chart_data,
             "last_active": current_time,
@@ -121,10 +122,10 @@ DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly
         return ai_reply
 
     else:
-        user_data = user_sessions[user_id]
+        user_data = st.session_state.user_sessions[user_id]
 
         if user_data["count"] >= 5:
-            del user_sessions[user_id]
+            del st.session_state.user_sessions[user_id]
             return "You have reached the limit of 5 follow-up questions for this chart. Please submit a new question and Horary Number."
 
         messages = user_data["messages"]
@@ -141,7 +142,6 @@ Answer this question strictly using the mathematical positions from this chart. 
 """
         messages.append({"role": "user", "content": follow_up_prompt})
 
-        # THE FIX: Safety net for Scenario B
         try:
             response = client.chat.completions.create(
                 model=MODEL_NAME,

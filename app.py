@@ -148,7 +148,8 @@ st.title("✨ Astroman AI: KP Horary")
 
 # Feature: Panchang / Cosmic Weather Widget
 try:
-    day_name, day_lord = chart_caster.get_current_day_lord()
+    # THE FIX: Passed Shimla's longitude (77.17) so the day lord calculation does not crash.
+    day_name, day_lord = chart_caster.get_current_day_lord(77.17)
     planets, _ = chart_caster.get_live_planets()
     tithi = chart_caster.get_panchang_tithi(planets["Sun"], planets["Moon"])
     st.info(f"**Live Cosmic Weather (Shimla):** 🌙 {tithi} | ☀️ Day of {day_name} ({day_lord})")
@@ -199,10 +200,10 @@ if submitted:
                     st.session_state.session_id, question, city, int(horary_number)
                 )
                 
-                # Save the chart data directly into the frontend memory so the toggle works
-                if st.session_state.session_id in ai_narrator.user_sessions:
-                    st.session_state.raw_planets = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
-                    st.session_state.raw_ascendant = ai_narrator.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
+                # THE FIX: Changed 'ai_narrator.user_sessions' to 'st.session_state.user_sessions'
+                if st.session_state.session_id in st.session_state.user_sessions:
+                    st.session_state.raw_planets = st.session_state.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
+                    st.session_state.raw_ascendant = st.session_state.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
                 else:
                     st.session_state.raw_planets = None
                     st.session_state.raw_ascendant = None
