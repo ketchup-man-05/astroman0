@@ -92,6 +92,11 @@ st.markdown("""
 # 3. Initialize Session State Variables
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
+    
+# THE FIX: Explicitly initialize user_sessions here in the main app to prevent the crash!
+if "user_sessions" not in st.session_state:
+    st.session_state.user_sessions = {}
+    
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
     
@@ -125,7 +130,7 @@ def draw_north_indian_chart(planets_dict, ascendant_lon):
     def get_txt(h): return ", ".join(house_planets[h])
     def get_num(h): return (asc_sign + h - 1) % 12 + 1
         
-    # THE FIX: Compressed the entire SVG into a single, unbreakable line so Streamlit renders it as an image.
+    # Compressed SVG
     svg = f"""<div style="display:flex; justify-content:center; margin-bottom: 20px;"><svg viewBox="0 0 400 400" width="100%" max-width="400px" style="background-color: #1E293B; border: 2px solid #475569; border-radius: 8px;"><rect x="0" y="0" width="400" height="400" fill="none" stroke="#64748B" stroke-width="2"/><line x1="0" y1="0" x2="400" y2="400" stroke="#64748B" stroke-width="2"/><line x1="400" y1="0" x2="0" y2="400" stroke="#64748B" stroke-width="2"/><polygon points="200,0 400,200 200,400 0,200" fill="none" stroke="#64748B" stroke-width="2"/><text x="200" y="110" text-anchor="middle" font-size="14" font-weight="bold" fill="#60A5FA">{get_txt(1)}</text><text x="200" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(1)}</text><text x="100" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(2)}</text><text x="175" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(2)}</text><text x="60" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(3)}</text><text x="20" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(3)}</text><text x="110" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(4)}</text><text x="20" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(4)}</text><text x="60" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(5)}</text><text x="20" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(5)}</text><text x="100" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(6)}</text><text x="175" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(6)}</text><text x="200" y="310" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(7)}</text><text x="200" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(7)}</text><text x="300" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(8)}</text><text x="225" y="385" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(8)}</text><text x="350" y="300" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(9)}</text><text x="385" y="225" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(9)}</text><text x="290" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#E2E8F0">{get_txt(10)}</text><text x="385" y="200" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(10)}</text><text x="350" y="100" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(11)}</text><text x="385" y="175" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(11)}</text><text x="300" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#E2E8F0">{get_txt(12)}</text><text x="225" y="25" text-anchor="middle" font-size="11" fill="#94A3B8">{get_num(12)}</text></svg></div>"""
     return svg
 
@@ -148,7 +153,6 @@ st.title("✨ Astroman AI: KP Horary")
 
 # Feature: Panchang / Cosmic Weather Widget
 try:
-    # THE FIX: Passed Shimla's longitude (77.17) so the day lord calculation does not crash.
     day_name, day_lord = chart_caster.get_current_day_lord(77.17)
     planets, _ = chart_caster.get_live_planets()
     tithi = chart_caster.get_panchang_tithi(planets["Sun"], planets["Moon"])
@@ -200,7 +204,6 @@ if submitted:
                     st.session_state.session_id, question, city, int(horary_number)
                 )
                 
-                # THE FIX: Changed 'ai_narrator.user_sessions' to 'st.session_state.user_sessions'
                 if st.session_state.session_id in st.session_state.user_sessions:
                     st.session_state.raw_planets = st.session_state.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["planets"]
                     st.session_state.raw_ascendant = st.session_state.user_sessions[st.session_state.session_id]["chart_data"]["chart_data"]["cusps"][0]
