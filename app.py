@@ -170,12 +170,12 @@ if submitted:
             try:
                 # THE FIX: Ensure ai_narrator correctly takes these arguments!
                 reply = ai_narrator.handle_incoming_message(
-                    session_id=st.session_state.session_id, 
-                    user_message=question, 
-                    city=city, 
-                    horary_number=int(horary_number)
+                    st.session_state.session_id, 
+                    question, 
+                    city, 
+                    int(horary_number)
                 )
-                
+
                 # Check if chart_data was properly populated in the backend
                 session_data = st.session_state.user_sessions.get(st.session_state.session_id, {})
                 chart_metadata = session_data.get("chart_data", {}).get("chart_data", {})
@@ -244,11 +244,11 @@ if st.session_state.reading_done:
                 try:
                     # THE FIX: Standardized the API call to match the primary cast
                     follow_up_reply = ai_narrator.handle_incoming_message(
-                        session_id=st.session_state.session_id, 
-                        user_message=follow_up,
-                        city=st.session_state.user_city,
-                        horary_number=st.session_state.cosmic_number
-                    )
+                        st.session_state.session_id, 
+                        follow_up,
+                        st.session_state.user_city,
+                        st.session_state.cosmic_number
+                   )
                     st.write(follow_up_reply)
                     st.session_state.chat_history.append({"role": "assistant", "content": follow_up_reply})
                 except Exception as e:
