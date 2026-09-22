@@ -12,12 +12,9 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-# Active model on your Groq console
-MODEL_NAME = "openai/gpt-oss-120b"
-
-# THE FIX: Use Streamlit's session state to prevent the dictionary from resetting on every click
-if "user_sessions" not in st.session_state:
-    st.session_state.user_sessions = {}
+# THE LION'S FIX: Use a real, highly capable Groq model. 
+# "llama-3.1-70b-versatile" is incredibly fast and strictly follows JSON parsing instructions.
+MODEL_NAME = "llama-3.1-70b-versatile"
 
 def get_query_houses(user_question):
     """Keyword router mapping questions to standard KP primary & secondary houses."""
@@ -42,18 +39,27 @@ def get_query_houses(user_question):
     else:
         return {"positive_houses": [2, 11], "negative_houses": [8, 12]}
 
-def handle_incoming_message(user_id, user_message, city=None, horary_number=None):
+def handle_incoming_message(session_id, user_message, city=None, horary_number=None):
     current_time = time.time()
+    
+    # Ensure session dict exists (failsafe if imported weirdly)
+    if "user_sessions" not in st.session_state:
+        st.session_state.user_sessions = {}
 
-    # THE FIX: Replace 'user_sessions' with 'st.session_state.user_sessions' throughout
-    if user_id in st.session_state.user_sessions:
-        time_elapsed = current_time - st.session_state.user_sessions[user_id]["last_active"]
-        if time_elapsed > 1200:
-            del st.session_state.user_sessions[user_id]
+    # --- 1. HANDLE SESSION TIMEOUTS ---
+    is_follow_up = session_id in st.session_state.user_sessions
+    
+    if is_follow_up:
+        time_elapsed = current_time - st.session_state.user_sessions[session_id]["last_active"]
+        if time_elapsed > 1200:  # 20 minutes
+            del st.session_state.user_sessions[session_id]
+            is_follow_up = False
+            return "Your cosmic connection has timed out (20 minutes). Please click 'Cast Horary Chart & Analyze' to re-align the stars."
 
-    if user_id not in st.session_state.user_sessions:
+    # --- 2. PRIMARY CAST (NEW CHART) ---
+    if not is_follow_up:
         if not city or not horary_number:
-            return "Your previous session ended. Please enter your question, city, and a Horary Number (1-249) to begin a new chart."
+            return "System Error: Missing City or Horary Number to cast a new chart."
 
         house_rules = get_query_houses(user_message)
 
@@ -83,7 +89,8 @@ You MUST structure your response in exactly two distinct sections using Markdown
 
 ### 1. The Verdict
 Give a definitive, bolded "YES", "NO", or "MIXED". 
-You MUST explicitly state the final KP Score by reading the exact 'kp_score' value from the JSON data. Format it exactly like this: "Final KP Score: [Insert Score Here]". Do not guess or output 0 unless the JSON actually says 0.
+You MUST explicitly state the final KP Score by reading the exact 'kp_score' value from the JSON data. Format it exactly like this: "Final KP Score: [Insert Score Here]". 
+CRITICAL RULE: DO NOT calculate the score yourself. Trust the JSON 'kp_score' completely. 
 
 ### 2. KP Mathematical Breakdown
 Explain the exact math that led to this score by matching the houses in the 4 Steps against the Target Positive and Negative houses. Be transparent about why points were awarded or NOT awarded.
@@ -97,7 +104,6 @@ If a house was neutral (not in the positive/negative lists), explicitly state th
 
 DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly to the mathematical proof of the chart.
 """
-
         messages = [{"role": "user", "content": initial_prompt}]
 
         try:
@@ -108,25 +114,25 @@ DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly
             )
             ai_reply = response.choices[0].message.content
         except Exception as e:
-            return "System Error: The AI Oracle is currently experiencing high traffic. Please wait 10 seconds and try clicking 'Cast Horary Chart & Analyze' again."
+            return f"System Error: The AI Oracle failed to respond. Check API keys and model names. (System flag: {str(e)})"
 
         messages.append({"role": "assistant", "content": ai_reply})
 
-        st.session_state.user_sessions[user_id] = {
+        # Save session
+        st.session_state.user_sessions[session_id] = {
             "messages": messages,
             "chart_data": chart_data,
             "last_active": current_time,
             "count": 0
         }
-
         return ai_reply
 
+    # --- 3. FOLLOW-UP CHAT ---
     else:
-        user_data = st.session_state.user_sessions[user_id]
+        user_data = st.session_state.user_sessions[session_id]
 
         if user_data["count"] >= 5:
-            del st.session_state.user_sessions[user_id]
-            return "You have reached the limit of 5 follow-up questions for this chart. Please submit a new question and Horary Number."
+            return "You have reached the limit of 5 follow-up questions for this chart. Please submit a new question to cast a fresh chart."
 
         messages = user_data["messages"]
         chart_data = user_data["chart_data"]
@@ -150,9 +156,8 @@ Answer this question strictly using the mathematical positions from this chart. 
             )
             ai_reply = response.choices[0].message.content
         except Exception as e:
-            # We pop the failed prompt off the memory stack so the user can try asking it again
-            messages.pop() 
-            return "System Error: The AI Oracle is currently experiencing high traffic. Please try asking your follow-up question again in a few seconds."
+            messages.pop() # Safely remove the failed user prompt from memory
+            return f"System Error: Follow-up failed. (System flag: {str(e)})"
 
         messages.append({"role": "assistant", "content": ai_reply})
 

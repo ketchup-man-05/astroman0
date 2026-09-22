@@ -67,12 +67,14 @@ def generate_kp_249_table():
                 split_point = end_sign_idx * 30.0
                 table.append({
                     "start_deg": current_longitude,
+                    "end_deg": split_point,  # THE FIX: Store the end boundary
                     "sign": zodiac_signs[current_sign_idx],
                     "star_lord": star_lord,
                     "sub_lord": sub_lord
                 })
                 table.append({
                     "start_deg": split_point,
+                    "end_deg": end_longitude, # THE FIX: Store the end boundary
                     "sign": zodiac_signs[end_sign_idx],
                     "star_lord": star_lord,
                     "sub_lord": sub_lord
@@ -80,6 +82,7 @@ def generate_kp_249_table():
             else:
                 table.append({
                     "start_deg": current_longitude,
+                    "end_deg": end_longitude, # THE FIX: Store the end boundary
                     "sign": zodiac_signs[current_sign_idx],
                     "star_lord": star_lord,
                     "sub_lord": sub_lord
@@ -96,16 +99,14 @@ def get_horary_chart(number):
         return {"error": "Horary number must be between 1 and 249"}
     
     entry = kp_table[number - 1]
+    
+    # THE FIX: Calculate the exact mathematical center of the Sub-Lord's territory
+    midpoint = (entry["start_deg"] + entry["end_deg"]) / 2.0
+    
     return {
         "horary_number": number,
-        "ascendant_longitude": round(entry["start_deg"], 4),
+        "ascendant_longitude": round(midpoint, 6),
         "sign": entry["sign"],
         "star_lord": entry["star_lord"],
         "sub_lord": entry["sub_lord"]
     }
-
-# --- TEST 1-249 ---
-print(f"Total KP subdivisions generated: {len(kp_table)}")
-test_num = 45
-chart = get_horary_chart(test_num)
-print(f"Horary #{test_num}: {chart['sign']} at {chart['ascendant_longitude']}° | Star: {chart['star_lord']} | Sub: {chart['sub_lord']}")

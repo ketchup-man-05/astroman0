@@ -1,6 +1,7 @@
 import swisseph as swe
 from datetime import datetime, timezone, timedelta
 from geopy.geocoders import Nominatim
+import re
 import kp_math
 
 # --- CORE SETTINGS ---
@@ -53,7 +54,6 @@ def get_houses_owned_by_planet(planet, cusps, planets_dict):
     return owned_houses
 
 def get_coordinates(city_name):
-    # THE FIX: Restored the fast-track bypass and timeout
     if city_name.lower() == "shimla":
         return 31.10, 77.17
         
@@ -133,17 +133,13 @@ def get_panchang_tithi(sun_lon, moon_lon):
     return f"{paksha} {TITHIS[tithi_index]}"
 
 def get_current_day_lord(lon):
-    # Dynamically calculate the user's timezone offset based on their GPS Longitude
-    # The Earth rotates 15 degrees per hour.
     offset_hours = lon / 15.0
-    
     now = datetime.now(timezone.utc)
     local_time = now + timedelta(hours=offset_hours)
     
     weekday = local_time.weekday() # Monday = 0
     sun_index = (weekday + 1) % 7
     
-    # Hindu day changes at roughly 6 AM local time, not midnight.
     if local_time.hour < 6:
         sun_index = (sun_index - 1) % 7
         
@@ -157,9 +153,28 @@ def get_live_ascendant(lat, lon):
 
 # --- THE MASTER PIPELINE ---
 def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
-    # THE FIX: Force incoming houses to integers to prevent the "0 score" string mismatch bug.
-    positive_houses = [int(h) for h in positive_houses]
-    negative_houses = [int(h) for h in negative_houses]
+    
+    # THE FIX: A bulletproof parser to rip integers out of whatever garbage Groq sends.
+    def _parse_houses(h_input):
+        if not h_input: 
+            return []
+        if isinstance(h_input, list):
+            # Cleans a list even if it contains strings like ["2", " 11 "]
+            return [int(str(x).strip()) for x in h_input if str(x).strip().isdigit()]
+        if isinstance(h_input, str):
+            # If the LLM passed a string like "[2, 6, 11]", extract the raw numbers
+            return [int(x) for x in re.findall(r'\d+', h_input)]
+        if isinstance(h_input, dict):
+            # If the LLM accidentally nested it inside an object
+            vals = []
+            for v in h_input.values():
+                if isinstance(v, list): vals.extend(v)
+                elif isinstance(v, str): vals.extend(re.findall(r'\d+', v))
+            return [int(x) for x in vals if str(x).isdigit()]
+        return []
+
+    positive_houses = _parse_houses(positive_houses)
+    negative_houses = _parse_houses(negative_houses)
 
     lat, lon = get_coordinates(city)
     if not lat: return {"error": "Location not found."}
@@ -182,7 +197,6 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     moon_sign_lord = get_sign_lord(moon_lon)
     moon_star_lord = get_star_lord(moon_lon)
     
-    # THE FIX: Passed 'lon' argument here so the function doesn't crash on execution.
     day_name, day_lord = get_current_day_lord(lon)
     current_tithi = get_panchang_tithi(planets["Sun"], moon_lon)
     
@@ -193,7 +207,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     punarphoo_active = dist <= 3.33 
 
     # 4. 4-Step Significators
-    sl_lon = planets[horary_sub_lord]
+    sl_lon = planets.get(horary_sub_lord, 0)
     sl_star_lord = get_star_lord(sl_lon)
     
     true_sl_star_lord = get_true_agent(sl_star_lord, planets)
@@ -246,15 +260,12 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
         "all_houses": list(set(all_signified_houses)),
         "moon_star_lord": moon_star_lord,
         "punarphoo": punarphoo_active,
-        
-        # THE FIX: I added the significators here so the AI can finally see the math!
         "significators": {
             "step_1_house": step_1_house,
             "step_2_houses": step_2_houses,
             "step_3_house": step_3_house,
             "step_4_houses": step_4_houses
         },
-        
         "panchang": {
             "day_name": day_name,
             "tithi": current_tithi
@@ -267,7 +278,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
             "day_lord": day_lord
         },
         "chart_data": {
-            "cusps": list(cusps[1:]), # Strips the 0 index so it matches Houses 1-12
+            "cusps": list(cusps[1:]),
             "planets": planets,
             "planet_houses": planet_houses
         }
