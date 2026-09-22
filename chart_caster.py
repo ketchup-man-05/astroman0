@@ -177,7 +177,14 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
         "verdict": verdict, "kp_score": score, "sub_lord": horary_sub_lord, "is_retrograde": is_retrograde,
         "all_houses": list(set(all_signified_houses)), "moon_star_lord": get_star_lord(moon_lon),
         "punarphoo": punarphoo_active,
-        "significators": {"step_1_house": step_1_house, "step_2_houses": step_2_houses, "step_3_house": step_3_house, "step_4_houses": step_4_houses},
+        "significators": {
+            "true_star_lord": true_sl_star_lord,
+            "true_sub_lord": true_sub_lord,
+            "step_1_house": step_1_house,
+            "step_2_houses": step_2_houses,
+            "step_3_house": step_3_house,
+            "step_4_houses": step_4_houses
+        },
         "panchang": {"day_name": day_name, "tithi": current_tithi},
         "ruling_planets": {"asc_sign_lord": rp_asc_sign_lord, "asc_star_lord": rp_asc_star_lord, "moon_sign_lord": get_sign_lord(moon_lon), "moon_star_lord": get_star_lord(moon_lon), "day_lord": day_lord},
         "chart_data": {"cusps": list(cusps[1:]), "planets": planets, "planet_houses": planet_houses}
