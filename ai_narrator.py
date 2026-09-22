@@ -92,13 +92,18 @@ You MUST explicitly state the final KP Score by reading the exact 'kp_score' val
 CRITICAL RULE: DO NOT calculate the score yourself. Trust the JSON 'kp_score' completely. 
 
 ### 2. KP Mathematical Breakdown
-Explain the exact math that led to this score by matching the houses in the 4 Steps against the Target Positive and Negative houses. Be transparent about why points were awarded or NOT awarded.
-- Step 1 (Star Lord Occupation)
-- Step 2 (Star Lord Ownership)
-- Step 3 (Sub Lord Occupation)
-- Step 4 (Sub Lord Ownership)
-If a house was neutral (not in the positive/negative lists), explicitly state that it received 0 points.
-- If 'is_retrograde' is true, explicitly state that the Retrograde Star Lord denies the event entirely, regardless of the score.
+You MUST use these exact point weights calculated by the Python engine:
+- Step 1 (Star Lord Occupation): ±4 points
+- Step 2 (Star Lord Ownership): ±3 points
+- Step 3 (Sub Lord Occupation): ±2 points
+- Step 4 (Sub Lord Ownership): ±1 point
+
+Explain the exact math that led to the score by matching the houses in the 4 Steps against the Target Positive and Negative houses using those exact weights. 
+- If a house is in the Positive list, award positive points.
+- If a house is in the Negative list, subtract points.
+- If neutral, award 0 points.
+- Trust the JSON 'kp_score' completely. Do not override or recalculate the score yourself.
+- If 'is_retrograde' is true, explicitly state that the Retrograde Star Lord denies the event entirely.
 - If 'punarphoo' is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
 
 DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly to the mathematical proof of the chart.
