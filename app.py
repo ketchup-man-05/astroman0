@@ -153,6 +153,9 @@ if submitted:
     if not question or not city:
         st.error("Please fill in both your question and city.")
     else:
+        # THE FIX: Generate a brand new Session ID to force a fresh chart calculation
+        st.session_state.session_id = str(uuid.uuid4())
+        
         st.session_state.reading_done = False
         st.session_state.question_input = question
         st.session_state.user_city = city
