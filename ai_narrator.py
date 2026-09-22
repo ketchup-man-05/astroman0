@@ -13,8 +13,7 @@ client = OpenAI(
 )
 
 # THE LION'S FIX: Use a real, highly capable Groq model. 
-# "llama-3.1-70b-versatile" is incredibly fast and strictly follows JSON parsing instructions.
-MODEL_NAME = "llama-3.1-70b-versatile"
+MODEL_NAME = "openai/gpt-oss-120b"
 
 def get_query_houses(user_question):
     """Keyword router mapping questions to standard KP primary & secondary houses."""
