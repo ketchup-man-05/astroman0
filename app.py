@@ -1,6 +1,7 @@
 import streamlit as st
 import urllib.parse
 import uuid
+import time
 from typing import Any
 import html
 
@@ -78,7 +79,6 @@ def _load_live_weather(lon: float = 77.17) -> str:
 
 def draw_north_indian_chart(planets_dict, ascendant_lon):
     """Generates an SVG North Indian style diamond chart for Dark Mode."""
-    # THE FIX: Fallback if ascendant_lon is None to prevent crashes
     if ascendant_lon is None: return ""
     
     asc_sign = int(ascendant_lon // 30)
@@ -87,7 +87,6 @@ def draw_north_indian_chart(planets_dict, ascendant_lon):
     for p, lon in planets_dict.items():
         p_sign = int(lon // 30)
         h = (p_sign - asc_sign) % 12 + 1
-        # Safe escaping for HTML injection
         house_planets[h].append(html.escape(p[:2]))
         
     def get_txt(h): return ", ".join(house_planets[h])
@@ -107,7 +106,6 @@ def draw_south_indian_chart(planets_dict):
         planets = ", ".join(sign_placements[sign_idx])
         return f'<div class="kundli-box">{planets}</div>'
 
-    # THE FIX: Added spaces between boxes so HTML doesn't run together
     html_out = f"""<div class="kundli-grid">{box(11)} {box(0)} {box(1)} {box(2)} {box(10)} <div class="kundli-box kundli-empty" style="grid-column: span 2; grid-row: span 2; display:flex; align-items:center; justify-content:center; font-size:14px; color:#94A3B8;">Rasi Chart</div> {box(3)} {box(9)} {box(4)} {box(8)} {box(7)} {box(6)} {box(5)}</div>"""
     return html_out
 
@@ -155,7 +153,6 @@ if submitted:
     if not question or not city:
         st.error("Please fill in both your question and city.")
     else:
-        # THE FIX: Reset stale state immediately on submit
         st.session_state.reading_done = False
         st.session_state.question_input = question
         st.session_state.user_city = city
@@ -168,22 +165,20 @@ if submitted:
             st.write("Consulting Groq 120B AI...")
             
             try:
-                # THE FIX: Ensure ai_narrator correctly takes these arguments!
+                # Direct positional arguments to bypass module caching issues
                 reply = ai_narrator.handle_incoming_message(
                     st.session_state.session_id, 
                     question, 
                     city, 
                     int(horary_number)
                 )
-
-                # Check if chart_data was properly populated in the backend
+                
                 session_data = st.session_state.user_sessions.get(st.session_state.session_id, {})
                 chart_metadata = session_data.get("chart_data", {}).get("chart_data", {})
                 
                 if chart_metadata:
                     st.session_state.raw_planets = chart_metadata.get("planets")
                     cusps = chart_metadata.get("cusps")
-                    # Safely handle cusps index
                     st.session_state.raw_ascendant = cusps[0] if cusps else None
                 else:
                     st.session_state.raw_planets = None
@@ -242,13 +237,13 @@ if st.session_state.reading_done:
         with st.chat_message("assistant"):
             with st.spinner("Consulting the chart..."):
                 try:
-                    # THE FIX: Standardized the API call to match the primary cast
+                    # Direct positional arguments for the follow-up
                     follow_up_reply = ai_narrator.handle_incoming_message(
                         st.session_state.session_id, 
                         follow_up,
                         st.session_state.user_city,
                         st.session_state.cosmic_number
-                   )
+                    )
                     st.write(follow_up_reply)
                     st.session_state.chat_history.append({"role": "assistant", "content": follow_up_reply})
                 except Exception as e:
