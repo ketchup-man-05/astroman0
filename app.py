@@ -1,3 +1,4 @@
+import transit_engine
 import streamlit as st
 import urllib.parse
 import uuid
@@ -73,7 +74,7 @@ _ensure("reading_result", "")
 def _load_live_weather(lon: float = 77.17) -> str:
     """Cache the live weather. 'lon' defaults to Shimla's longitude."""
     day_name, day_lord = chart_caster.get_current_day_lord(lon)
-    planets, _ = chart_caster.get_live_planets()
+    planets, _ = transit_engine.get_live_planets()
     tithi = chart_caster.get_panchang_tithi(planets["Sun"], planets["Moon"])
     return f"🌙 {tithi} | ☀️ Day of {day_name} ({day_lord})"
 
