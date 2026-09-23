@@ -12,8 +12,29 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-# THE LION'S FIX: Use a real, highly capable Groq model. 
 MODEL_NAME = "openai/gpt-oss-120b"
+
+SYSTEM_PROMPT = """You are a KP (Krishnamurti Paddhati) Horary report formatter.
+
+Every astrological calculation has ALREADY been performed by a Python engine and is supplied to you as JSON facts. You are NOT an astrologer doing math. You are a formatter and explainer of finished results.
+
+ABSOLUTELY FORBIDDEN - you must NEVER:
+- Calculate, infer, or guess a zodiac sign from any degree or number.
+- Calculate, infer, or guess which houses a planet owns or rules. Never reason "Sign X is ruled by Planet Y" yourself.
+- Decide which house a planet occupies.
+- Calculate, add up, adjust, or re-derive any point score. Never do your own arithmetic on the chart.
+- Claim a planet became the Star Lord or Sub Lord because of where it sits. The Star Lord and Sub Lord are fixed in advance by the Horary Number (1-249).
+- Invent remedies, behavioral advice, or timing predictions.
+- Use outside astrological knowledge to fill gaps or to contradict the JSON.
+
+REQUIRED - you must ONLY:
+- Copy signs, house occupations, house ownerships, and points exactly as written in the JSON (the "planets", "house_cusps", "house_ownership", and "step_breakdown" fields).
+- Use "kp_score" exactly as given, and the "text" lines in "step_breakdown" for each step's math.
+- If "is_retrograde" is true, state that the retrograde Star Lord denies the event, overriding the score.
+- If "punarphoo" is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
+- If something is not in the JSON, say that the chart data does not contain it. Do not work it out.
+
+If the numbers seem unusual to you, present them anyway. The JSON is the single source of truth."""
 
 def get_query_houses(user_question):
     """Keyword router mapping questions to standard KP primary & secondary houses."""
@@ -72,45 +93,34 @@ def handle_incoming_message(session_id, user_message, city=None, horary_number=N
         if not chart_data or "error" in chart_data:
             return "System Error: Unable to cast the chart. Please check the city name and Horary Number."
 
-        initial_prompt = f"""
-You are an elite, highly clinical KP (Krishnamurti Paddhati) Astrologer. Your job is to act as a strict mathematical interpreter of the provided KP Horary data.
+        # The LLM only ever sees the pre-calculated, text-only facts.
+        ai_facts = chart_data["ai_facts"]
 
+        initial_prompt = f"""
 User Question: "{user_message}"
 Location: {city}
 Horary Number: {horary_number}
-Target Positive Houses: {house_rules['positive_houses']}
-Target Negative Houses: {house_rules['negative_houses']}
 
-Chart Data (Raw KP Engine JSON):
-{json.dumps(chart_data, indent=2)}
+PRE-CALCULATED FACTS (computed by Python; do not recalculate anything):
+{json.dumps(ai_facts, indent=2)}
 
-You MUST structure your response in exactly two distinct sections using Markdown headers:
+Write your response in exactly two sections using Markdown headers:
 
 ### 1. The Verdict
-Give a definitive, bolded "YES", "NO", or "MIXED". 
-You MUST explicitly state the final KP Score by reading the exact 'kp_score' value from the JSON data. Format it exactly like this: "Final KP Score: [Insert Score Here]". 
-CRITICAL RULE: DO NOT calculate the score yourself. Trust the JSON 'kp_score' completely. 
+Give a bolded "YES", "NO", or "MIXED" that matches the "verdict" field (DEFINITIVE YES / YES WITH DELAYS -> YES; UNFAVORABLE / NO / DEFINITIVE NO / DENIED -> NO; use MIXED only if the verdict text itself is ambiguous).
+Then state the score in exactly this format: "Final KP Score: {ai_facts['kp_score']}"
 
 ### 2. KP Mathematical Breakdown
-CRITICAL ASTROLOGICAL LAW: The Star Lord and Sub Lord are PRE-DETERMINED mathematically by the user's Horary Number (1-249). You must NEVER claim a planet became the Star Lord or Sub Lord because it physically occupies a house. Step 1 and Step 3 simply ask where those pre-determined planets happen to reside in the chart today.
-
-You MUST use these exact point weights to explain the math:
-- Step 1 (Star Lord Occupation): ±4 points
-- Step 2 (Star Lord Ownership): ±3 points
-- Step 3 (Sub Lord Occupation): ±2 points
-- Step 4 (Sub Lord Ownership): ±1 point
-
-Explain the math by matching the houses in the 4 Steps against the Target Positive and Negative houses. 
-- Positive list match = add points.
-- Negative list match = subtract points.
-- Neutral = 0 points.
-- Trust the JSON 'kp_score' completely. Do not guess or override the final score.
-- If 'is_retrograde' is true, state that the Retrograde Star Lord denies the event entirely, overriding the math.
-- If 'punarphoo' is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
-
-DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly to the mathematical proof of the chart.
+- First, one short line naming the Star Lord and Sub Lord from the "horary" field, and noting they are fixed by the Horary Number.
+- Then present the four steps in order by reproducing each "text" line from "step_breakdown" as a clear line item, adding which planet it refers to and, where useful, the planet's sign and house facts copied from "planets" / "house_cusps".
+- State the target positive houses and negative houses exactly as listed.
+- Apply the retrograde and Punarphoo rules if the flags are true.
+- Do not add remedies, advice, or timing predictions.
 """
-        messages = [{"role": "user", "content": initial_prompt}]
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": initial_prompt},
+        ]
 
         try:
             response = client.chat.completions.create(
@@ -124,7 +134,7 @@ DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly
 
         messages.append({"role": "assistant", "content": ai_reply})
 
-        # Save session
+        # Save session (full chart_data kept for the UI; only ai_facts goes to the LLM)
         st.session_state.user_sessions[session_id] = {
             "messages": messages,
             "chart_data": chart_data,
@@ -141,16 +151,16 @@ DO NOT invent remedies, behavioral advice, or timing predictions. Stick strictly
             return "You have reached the limit of 5 follow-up questions for this chart. Please submit a new question to cast a fresh chart."
 
         messages = user_data["messages"]
-        chart_data = user_data["chart_data"]
+        ai_facts = user_data["chart_data"]["ai_facts"]
 
         follow_up_prompt = f"""
 User Follow-up Question: "{user_message}"
 
-Reference Chart Data:
-{json.dumps(chart_data, indent=2)}
+PRE-CALCULATED FACTS (unchanged; do not recalculate anything):
+{json.dumps(ai_facts, indent=2)}
 
 Instructions:
-Answer this question strictly using the mathematical positions from this chart. Do not give generalizations. Maintain a clinical, mathematical tone.
+Answer using only the facts above, quoting signs, house occupations, house ownerships, and points exactly as written. Do not calculate or infer any sign, ownership, or score yourself. If answering would require a new score or facts not in the JSON (for example, judging a different topic than the original question), say that a fresh chart must be cast for that. Keep a clinical, factual tone.
 """
         messages.append({"role": "user", "content": follow_up_prompt})
 
