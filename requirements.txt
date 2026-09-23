@@ -1,4 +1,4 @@
-streamlit
-openai
-pysweph
-geopy
+streamlit>=1.35
+openai>=1.30
+pyswisseph>=2.10
+geopy>=2.4

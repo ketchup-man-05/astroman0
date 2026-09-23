@@ -65,6 +65,7 @@ _ensure("user_city", "Shimla")
 _ensure("cosmic_number", 45)
 _ensure("raw_planets", None)
 _ensure("raw_ascendant", None)
+_ensure("raw_planet_houses", None)
 _ensure("reading_result", "")
 
 # ----------------------------------------------------------------------
@@ -78,16 +79,26 @@ def _load_live_weather(lon: float = 77.17) -> str:
     tithi = chart_caster.get_panchang_tithi(planets["Sun"], planets["Moon"])
     return f"🌙 {tithi} | ☀️ Day of {day_name} ({day_lord})"
 
-def draw_north_indian_chart(planets_dict, ascendant_lon):
-    """Generates an SVG North Indian style diamond chart for Dark Mode."""
+def draw_north_indian_chart(planets_dict, ascendant_lon, planet_houses=None):
+    """Generates an SVG North Indian style diamond chart for Dark Mode.
+
+    planet_houses (optional): the Placidus-cusp house per planet, exactly as
+    computed by chart_caster.execute_kp_reading's scoring engine. When given,
+    the diagram places each planet in the SAME house the score used, so the
+    chart you see always matches the reading. Falls back to whole-sign
+    placement only if planet_houses wasn't provided.
+    """
     if ascendant_lon is None: return ""
     
     asc_sign = int(ascendant_lon // 30)
     house_planets = {h: [] for h in range(1, 13)}
     
     for p, lon in planets_dict.items():
-        p_sign = int(lon // 30)
-        h = (p_sign - asc_sign) % 12 + 1
+        if planet_houses and p in planet_houses:
+            h = planet_houses[p]
+        else:
+            p_sign = int(lon // 30)
+            h = (p_sign - asc_sign) % 12 + 1
         house_planets[h].append(html.escape(p[:2]))
         
     def get_txt(h): return ", ".join(house_planets[h])
@@ -184,9 +195,11 @@ if submitted:
                     st.session_state.raw_planets = chart_metadata.get("planets")
                     cusps = chart_metadata.get("cusps")
                     st.session_state.raw_ascendant = cusps[0] if cusps else None
+                    st.session_state.raw_planet_houses = chart_metadata.get("planet_houses")
                 else:
                     st.session_state.raw_planets = None
                     st.session_state.raw_ascendant = None
+                    st.session_state.raw_planet_houses = None
                 
                 st.session_state.reading_result = reply
                 st.session_state.reading_done = True
@@ -208,7 +221,7 @@ if st.session_state.reading_done:
         
         try:
             if chart_style == "North Indian":
-                st.markdown(draw_north_indian_chart(st.session_state.raw_planets, st.session_state.raw_ascendant), unsafe_allow_html=True)
+                st.markdown(draw_north_indian_chart(st.session_state.raw_planets, st.session_state.raw_ascendant, st.session_state.raw_planet_houses), unsafe_allow_html=True)
             else:
                 st.markdown(draw_south_indian_chart(st.session_state.raw_planets), unsafe_allow_html=True)
         except Exception as e:

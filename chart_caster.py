@@ -43,25 +43,61 @@ def get_houses_owned_by_planet(planet, cusps, planets_dict):
     return owned_houses
 
 def calculate_placidus_cusps(target_ascendant, lat, lon):
+    """
+    Finds the moment (within today's 24h UT window) whose Ascendant equals
+    target_ascendant, then returns the Placidus cusps for that moment.
+
+    Uses bisection instead of a brute-force minute/second scan: the real
+    Ascendant is monotonically increasing in time (it never runs backward),
+    so a coarse scan just needs to find which bracket the target falls in,
+    then bisection narrows it to sub-second precision in ~10-15 more calls.
+    This replaces ~1,680 swe.houses_ex calls with ~110, and is *more*
+    precise than the old fixed 1-second resolution.
+    """
     now = datetime.now(timezone.utc)
     base_jd = swe.julday(now.year, now.month, now.day, 0.0)
-    best_jd, min_diff = base_jd, 360.0
-    for minute in range(24 * 60):
-        test_jd = base_jd + (minute / 1440.0)
-        cusps, ascmc = swe.houses_ex(test_jd, lat, lon, b'P', swe.FLG_SIDEREAL)
-        diff = abs(ascmc[0] - target_ascendant)
-        if diff > 180: diff = 360 - diff
-        if diff < min_diff: min_diff, best_jd = diff, test_jd
 
-    final_best_jd, min_diff = best_jd, 360.0
-    for sec in range(-120, 120):
-        test_jd = best_jd + (sec / 86400.0)
-        cusps, ascmc = swe.houses_ex(test_jd, lat, lon, b'P', swe.FLG_SIDEREAL)
-        diff = abs(ascmc[0] - target_ascendant)
-        if diff > 180: diff = 360 - diff
-        if diff < min_diff: min_diff, final_best_jd = diff, test_jd
+    def signed_diff(jd):
+        cusps, ascmc = swe.houses_ex(jd, lat, lon, b'P', swe.FLG_SIDEREAL)
+        # signed difference in [-180, 180), positive = ascendant is ahead of target
+        d = (ascmc[0] - target_ascendant + 180) % 360 - 180
+        return d, cusps, ascmc
 
-    final_cusps, _ = swe.houses_ex(final_best_jd, lat, lon, b'P', swe.FLG_SIDEREAL)
+    n_coarse = 96  # 15-minute steps across the day
+    step = 1.0 / n_coarse
+
+    prev_jd = base_jd
+    prev_diff, _, _ = signed_diff(prev_jd)
+    lo, hi = None, None
+
+    for i in range(1, n_coarse + 1):
+        jd = base_jd + i * step
+        diff, _, _ = signed_diff(jd)
+        crossed = (prev_diff <= 0 <= diff) or (prev_diff >= 0 >= diff)
+        # ignore the 360->0 wrap itself, which also looks like a sign flip
+        if crossed and abs(diff - prev_diff) < 180:
+            lo, hi = prev_jd, jd
+            break
+        prev_jd, prev_diff = jd, diff
+
+    if lo is None:
+        # Fallback: shouldn't normally happen since the ascendant completes
+        # a full 360 degree cycle roughly once per day.
+        lo, hi = base_jd, base_jd + 1.0
+
+    lo_diff, _, _ = signed_diff(lo)
+    mid = lo
+    for _ in range(30):
+        mid = (lo + hi) / 2.0
+        mid_diff, cusps, ascmc = signed_diff(mid)
+        if (mid_diff > 0) == (lo_diff > 0):
+            lo, lo_diff = mid, mid_diff
+        else:
+            hi = mid
+        if (hi - lo) < (0.5 / 86400.0):  # sub-second precision reached
+            break
+
+    final_cusps, _ = swe.houses_ex(mid, lat, lon, b'P', swe.FLG_SIDEREAL)
     return final_cusps
 
 def find_planet_house(planet_lon, cusps):
@@ -115,6 +151,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     asc_data = kp_math.get_horary_chart(horary_number)
     target_asc = asc_data["ascendant_longitude"]
     horary_sub_lord = asc_data["sub_lord"]
+    horary_star_lord = asc_data["star_lord"]  # the fixed Nakshatra lord from the 1-249 table
     
     cusps = calculate_placidus_cusps(target_asc, lat, lon)
     planets, retrogrades = transit_engine.get_live_planets()
@@ -133,10 +170,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     if dist > 180: dist = 360 - dist
     punarphoo_active = dist <= 3.33 
 
-    sl_lon = planets.get(horary_sub_lord, 0)
-    sl_star_lord = get_star_lord(sl_lon)
-    
-    true_sl_star_lord = get_true_agent(sl_star_lord, planets)
+    true_sl_star_lord = get_true_agent(horary_star_lord, planets)
     true_sub_lord = get_true_agent(horary_sub_lord, planets)
     is_retrograde = retrogrades.get(true_sl_star_lord, False)
     
@@ -174,7 +208,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
         verdict = f"DEFINITIVE NO. Strong negative dominance (Score: {score}). The chart denies the event."
         
     return {
-        "verdict": verdict, "kp_score": score, "sub_lord": horary_sub_lord, "is_retrograde": is_retrograde,
+        "verdict": verdict, "kp_score": score, "sub_lord": horary_sub_lord, "star_lord": horary_star_lord, "is_retrograde": is_retrograde,
         "all_houses": list(set(all_signified_houses)), "moon_star_lord": get_star_lord(moon_lon),
         "punarphoo": punarphoo_active,
         "significators": {
