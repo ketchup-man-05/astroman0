@@ -159,6 +159,12 @@ def main():
             help="Close your eyes, focus deeply on your question, and type the very first number between 1 and 249."
         )
 
+        topic_label = st.selectbox(
+            "Topic of your question",
+            list(ai_narrator.TOPIC_OPTIONS.keys()),
+            help="Leave on Auto-detect and the app reads your question. Pick a topic yourself if your question is unusual, so the correct houses are used."
+        )
+
         submitted = st.form_submit_button("Cast Horary Chart & Analyze")
 
     if submitted:
@@ -182,7 +188,8 @@ def main():
                         st.session_state.session_id,
                         question,
                         city,
-                        int(horary_number)
+                        int(horary_number),
+                        topic=ai_narrator.TOPIC_OPTIONS[topic_label]
                     )
 
                     session_data = st.session_state.user_sessions.get(st.session_state.session_id, {})

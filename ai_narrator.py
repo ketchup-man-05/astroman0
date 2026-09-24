@@ -23,43 +23,94 @@ ABSOLUTELY FORBIDDEN - you must NEVER:
 - Calculate, infer, or guess which houses a planet owns or rules. Never reason "Sign X is ruled by Planet Y" yourself.
 - Decide which house a planet occupies.
 - Calculate, add up, adjust, or re-derive any point score. Never do your own arithmetic on the chart.
-- Claim a planet became the Star Lord or Sub Lord because of where it sits. The Star Lord and Sub Lord are fixed in advance by the Horary Number (1-249).
+- Claim a planet became the Cusp Sub Lord or its Star Lord for any reason of your own. They are calculated by the Python engine from the chart and supplied in the "decision" field.
 - Invent remedies, behavioral advice, or timing predictions.
 - Use outside astrological knowledge to fill gaps or to contradict the JSON.
 
 REQUIRED - you must ONLY:
-- Copy signs, house occupations, house ownerships, and points exactly as written in the JSON (the "planets", "house_cusps", "house_ownership", and "step_breakdown" fields).
+- Copy signs, house occupations, house ownerships, and points exactly as written in the JSON (the "planets", "house_cusps", "house_ownership", "decision", and "step_breakdown" fields).
 - Use "kp_score" exactly as given, and the "text" lines in "step_breakdown" for each step's math.
-- If "is_retrograde" is true, state that the retrograde Star Lord denies the event, overriding the score.
+- If "is_retrograde" is true, state that the deciding planet (the Cusp Sub Lord) is retrograde, which indicates delay or obstruction, as already reflected in the verdict.
 - If "punarphoo" is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
 - If something is not in the JSON, say that the chart data does not contain it. Do not work it out.
 
 If the numbers seem unusual to you, present them anyway. The JSON is the single source of truth."""
 
-def get_query_houses(user_question):
-    """Keyword router mapping questions to standard KP primary & secondary houses."""
+import re
+
+def _has_any(text, words):
+    """Whole-word keyword match (so 'land' does not match 'England', 'test' not 'latest').
+    Words of 3 letters or fewer must match exactly (optional plural 's'); longer words
+    match from the start of a word, so 'recover' also catches 'recovered' and 'marri'
+    catches 'married'/'marriage'."""
+    for w in words:
+        pattern = rf"\b{w}s?\b" if len(w) <= 3 else rf"\b{w}"
+        if re.search(pattern, text):
+            return True
+    return False
+
+# Order matters: the first topic whose keywords match wins (same order as before).
+TOPICS = [
+    ("career",   ["job", "career", "promotion", "work", "interview", "salary", "business",
+                  "employ", "hire", "hiring", "startup"],
+                 [2, 6, 10, 11], [1, 5, 9, 12], 10),
+    ("marriage", ["marry", "marri", "wife", "husband", "wedding", "spouse", "love", "relationship",
+                  "partner", "boyfriend", "girlfriend", "fiance", "engagement", "engaged"],
+                 [2, 7, 11], [1, 6, 10], 7),
+    ("travel",   ["travel", "visa", "abroad", "foreign", "relocate", "pr", "passport",
+                  "immigra", "emigra", "migrat", "overseas", "canada", "usa", "uk", "england",
+                  "australia", "germany", "dubai", "america", "europe"],
+                 [3, 9, 12], [2, 4, 11], 12),
+    ("health",   ["health", "recover", "sick", "surgery", "disease", "illness", "cure",
+                  "medic", "doctor", "hospital", "treatment", "heal"],
+                 [1, 5, 11], [6, 8, 12], 6),
+    ("property", ["property", "house", "buy", "land", "flat", "vehicle", "car",
+                  "apartment", "plot", "bike", "scooter"],
+                 [4, 11, 12], [3, 10], 4),
+    ("exam",     ["exam", "education", "study", "studi", "pass", "result", "test", "admission",
+                  "marks", "rank", "college", "university", "scholarship", "degree"],
+                 [4, 9, 11], [3, 8], 4),
+    ("children", ["child", "pregnan", "baby", "babies", "conceiv"],
+                 [2, 5, 11], [1, 4, 10], 5),
+    ("court",    ["court", "lawsuit", "litigation", "case", "legal", "dispute", "lawyer", "judge"],
+                 [6, 11], [12], 6),
+]
+DEFAULT_HOUSES = ([2, 11], [8, 12])   # money / general - used when nothing matches
+DEFAULT_KEY_HOUSE = 11                # 11th = fulfilment of desire
+
+# Each TOPICS row is: (name, keywords, positive houses, negative houses, KEY HOUSE).
+# The KEY HOUSE is the cusp whose SUB LORD decides the answer in KP horary.
+
+# Labels for the optional topic dropdown in the app (None = detect from the question)
+TOPIC_OPTIONS = {
+    "Auto-detect from my question": None,
+    "Career / Job / Business": "career",
+    "Marriage / Relationship": "marriage",
+    "Travel / Visa / Abroad": "travel",
+    "Health / Recovery": "health",
+    "Property / Vehicle": "property",
+    "Exam / Education": "exam",
+    "Children / Pregnancy": "children",
+    "Court case / Legal": "court",
+    "Money / Anything else": "general",
+}
+
+def get_query_houses(user_question, topic=None):
+    """Maps a question (or an explicitly chosen topic) to standard KP positive & negative houses."""
+    if topic == "general":
+        return {"positive_houses": list(DEFAULT_HOUSES[0]), "negative_houses": list(DEFAULT_HOUSES[1]), "key_house": DEFAULT_KEY_HOUSE}
+    if topic:
+        for key, _, pos, neg, kh in TOPICS:
+            if key == topic:
+                return {"positive_houses": list(pos), "negative_houses": list(neg), "key_house": kh}
+
     text = user_question.lower()
+    for _, keywords, pos, neg, kh in TOPICS:
+        if _has_any(text, keywords):
+            return {"positive_houses": list(pos), "negative_houses": list(neg), "key_house": kh}
+    return {"positive_houses": list(DEFAULT_HOUSES[0]), "negative_houses": list(DEFAULT_HOUSES[1]), "key_house": DEFAULT_KEY_HOUSE}
 
-    if any(word in text for word in ["job", "career", "promotion", "work", "interview", "salary", "business"]):
-        return {"positive_houses": [2, 6, 10, 11], "negative_houses": [1, 5, 9, 12]}
-    elif any(word in text for word in ["marry", "marriage", "wife", "husband", "wedding", "spouse", "love", "relationship"]):
-        return {"positive_houses": [2, 7, 11], "negative_houses": [1, 6, 10]}
-    elif any(word in text for word in ["travel", "visa", "abroad", "foreign", "relocate", "pr"]):
-        return {"positive_houses": [3, 9, 12], "negative_houses": [2, 4, 11]}
-    elif any(word in text for word in ["health", "recover", "sick", "surgery", "disease", "illness", "cure"]):
-        return {"positive_houses": [1, 5, 11], "negative_houses": [6, 8, 12]}
-    elif any(word in text for word in ["property", "house", "buy", "land", "flat", "vehicle", "car"]):
-        return {"positive_houses": [4, 11, 12], "negative_houses": [3, 10]}
-    elif any(word in text for word in ["exam", "education", "study", "pass", "result", "test", "admission"]):
-        return {"positive_houses": [4, 9, 11], "negative_houses": [3, 8]}
-    elif any(word in text for word in ["child", "pregnancy", "baby", "conceive"]):
-        return {"positive_houses": [2, 5, 11], "negative_houses": [1, 4, 10]}
-    elif any(word in text for word in ["court", "lawsuit", "litigation", "case", "legal", "dispute"]):
-        return {"positive_houses": [6, 11], "negative_houses": [12]}
-    else:
-        return {"positive_houses": [2, 11], "negative_houses": [8, 12]}
-
-def handle_incoming_message(session_id, user_message, city=None, horary_number=None):
+def handle_incoming_message(session_id, user_message, city=None, horary_number=None, topic=None):
     current_time = time.time()
     
     # Ensure session dict exists (failsafe if imported weirdly)
@@ -81,13 +132,14 @@ def handle_incoming_message(session_id, user_message, city=None, horary_number=N
         if not city or not horary_number:
             return "System Error: Missing City or Horary Number to cast a new chart."
 
-        house_rules = get_query_houses(user_message)
+        house_rules = get_query_houses(user_message, topic)
 
         chart_data = chart_caster.execute_kp_reading(
             city,
             horary_number,
             house_rules["positive_houses"],
-            house_rules["negative_houses"]
+            house_rules["negative_houses"],
+            house_rules["key_house"]
         )
 
         if not chart_data or "error" in chart_data:
@@ -107,14 +159,15 @@ PRE-CALCULATED FACTS (computed by Python; do not recalculate anything):
 Write your response in exactly two sections using Markdown headers:
 
 ### 1. The Verdict
-Give a bolded "YES", "NO", or "MIXED" that matches the "verdict" field (DEFINITIVE YES / YES WITH DELAYS -> YES; UNFAVORABLE / NO / DEFINITIVE NO / DENIED -> NO; use MIXED only if the verdict text itself is ambiguous).
+Give a bolded "YES", "NO", or "MIXED" that matches the "verdict" field (DEFINITIVE YES / YES WITH DELAYS -> YES; UNFAVORABLE / NO / DEFINITIVE NO -> NO; MIXED / CONFLICTING or MIXED / UNCLEAR -> MIXED).
 Then state the score in exactly this format: "Final KP Score: {ai_facts['kp_score']}"
 
 ### 2. KP Mathematical Breakdown
-- First, one short line naming the Star Lord and Sub Lord from the "horary" field, and noting they are fixed by the Horary Number.
+- First, one short line naming the key house, its Cusp Sub Lord (the deciding planet) and that planet's Star Lord from the "decision" field, noting the engine calculated them from the chart. If "decision.note" is not empty, include it.
 - Then present the four steps in order by reproducing each "text" line from "step_breakdown" as a clear line item, adding which planet it refers to and, where useful, the planet's sign and house facts copied from "planets" / "house_cusps".
 - State the target positive houses and negative houses exactly as listed.
 - Apply the retrograde and Punarphoo rules if the flags are true.
+- Include the "ruling_planet_check" text line exactly as written; it is confirmation only and does not change the score.
 - Do not add remedies, advice, or timing predictions.
 """
         messages = [

@@ -30,7 +30,8 @@ def _normalize_longitude(longitude):
 def _degree_to_arcseconds(longitude):
     normalized = Decimal(str(_normalize_longitude(longitude)))
     total_arcseconds = normalized * Decimal("3600")
-    return int(total_arcseconds.to_integral_value(rounding=ROUND_FLOOR))
+    # tiny epsilon absorbs float error (e.g. 13199.9999999 -> 13200) at exact boundaries
+    return int((total_arcseconds + Decimal("0.000001")).to_integral_value(rounding=ROUND_FLOOR))
 
 def _arcseconds_to_degree(arcseconds):
     return arcseconds / 3600.0

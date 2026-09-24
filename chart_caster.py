@@ -28,11 +28,14 @@ def get_star_lord(degree):
 def get_true_agent(planet, planets_dict):
     if planet not in NODES: return planet
     node_lon = planets_dict.get(planet, 0)
+    nearest, nearest_dist = None, None
     for p_name, p_lon in planets_dict.items():
         if p_name not in NODES:
             dist = abs(node_lon - p_lon)
             if dist > 180: dist = 360 - dist
-            if dist <= 3.33: return p_name 
+            if dist <= 3.33 and (nearest_dist is None or dist < nearest_dist):
+                nearest, nearest_dist = p_name, dist
+    if nearest is not None: return nearest  # closest planet within 3.33 deg wins
     return get_sign_lord(node_lon)
 
 def get_sign_index(degree):
@@ -167,10 +170,22 @@ def _classify(house, positive_set, negative_set):
     if house in negative_set: return "negative"
     return "neutral"
 
-def compute_step_breakdown(true_star, true_sub, planet_houses, ownership, planets, positive_set, negative_set):
+def compute_step_breakdown(star_lord, sub_lord, planet_houses, ownership, planets, positive_set, negative_set):
     """
-    The four KP steps, scored entirely in Python.
-    Step weights: 1 = ±4, 2 = ±3 (per owned house), 3 = ±2, 4 = ±1 (per owned house).
+    KP signification of the DECIDING planet = the sub lord of the key house's cusp
+    (`sub_lord`), read through the star it sits in (`star_lord`). Steps follow the classical
+    KP order of strength, and the weights are +-4 / +-3 / +-2 / +-1:
+
+      1. houses occupied by its Star Lord        (weight 4)
+      2. house occupied by the planet itself     (weight 3)
+      3. houses owned by its Star Lord           (weight 2)
+      4. houses owned by the planet itself       (weight 1)
+
+    Ownership steps (3 and 4) are CAPPED: the weight counts once for "any owned house is
+    positive" and once for "any owned house is negative", never once per house. If both are
+    present the step is flagged mixed/volatile instead of looking neutral.
+    If the planet sits in its own star (star_lord == sub_lord), steps 2 and 4 would only repeat
+    steps 1 and 3, so they are not counted a second time.
     """
     weights = {"positive": 1, "negative": -1, "neutral": 0}
 
@@ -182,40 +197,92 @@ def compute_step_breakdown(true_star, true_sub, planet_houses, ownership, planet
             "step": step_no, "name": label, "planet": planet,
             "houses": [house], "weight": weight,
             "house_results": [{"house": house, "classification": cls, "points": pts}],
+            "mixed": False, "skipped": False,
             "step_points": pts,
             "text": f"Step {step_no} ({label}): {planet} occupies the {kp_math.ordinal(house)} House -> {cls} -> {pts:+d}",
         }
 
     def ownership_step(step_no, label, planet, weight):
         owned = get_houses_owned_by_planet(planet, ownership, planets)
-        results = []
-        for h in owned:
-            cls = _classify(h, positive_set, negative_set)
-            results.append({"house": h, "classification": cls, "points": weights[cls] * weight})
-        total = sum(r["points"] for r in results)
+        results = [{"house": h, "classification": _classify(h, positive_set, negative_set)} for h in owned]
+        has_pos = any(r["classification"] == "positive" for r in results)
+        has_neg = any(r["classification"] == "negative" for r in results)
+        mixed = has_pos and has_neg
+        total = (weight if has_pos else 0) - (weight if has_neg else 0)
         if owned:
-            detail = "; ".join(
-                f"{kp_math.ordinal(r['house'])} House -> {r['classification']} ({r['points']:+d})" for r in results
-            )
-            text = f"Step {step_no} ({label}): {planet} owns {kp_math.format_house_list(owned)}: {detail} = {total:+d}"
+            detail = "; ".join(f"{kp_math.ordinal(r['house'])} House -> {r['classification']}" for r in results)
+            if mixed:
+                outcome = f"MIXED/VOLATILE (positive {weight:+d} and negative {-weight:+d}) = {total:+d}"
+            elif has_pos:
+                outcome = f"positive, counted once (not stacked) = {total:+d}"
+            elif has_neg:
+                outcome = f"negative, counted once (not stacked) = {total:+d}"
+            else:
+                outcome = "neutral = +0"
+            text = f"Step {step_no} ({label}): {planet} owns {kp_math.format_house_list(owned)}: {detail} => {outcome}"
         else:
             text = f"Step {step_no} ({label}): {planet} owns no house cusps = 0"
         return {
             "step": step_no, "name": label, "planet": planet,
             "houses": owned, "weight": weight,
-            "house_results": results, "step_points": total, "text": text,
+            "house_results": results, "mixed": mixed, "skipped": False,
+            "step_points": total, "text": text,
         }
 
+    def repeated_step(step_no, label, planet, weight, same_as):
+        return {
+            "step": step_no, "name": label, "planet": planet,
+            "houses": [], "weight": weight,
+            "house_results": [], "mixed": False, "skipped": True,
+            "step_points": 0,
+            "text": f"Step {step_no} ({label}): {planet} sits in its own star, so this repeats Step {same_as} and is not counted again = 0",
+        }
+
+    own_star = (star_lord == sub_lord)
     steps = [
-        occupation_step(1, "Star Lord Occupation", true_star, 4),
-        ownership_step(2, "Star Lord Ownership", true_star, 3),
-        occupation_step(3, "Sub Lord Occupation", true_sub, 2),
-        ownership_step(4, "Sub Lord Ownership", true_sub, 1),
+        occupation_step(1, "Star Lord Occupation", star_lord, 4),
+        repeated_step(2, "Cusp Sub Lord Occupation", sub_lord, 3, 1) if own_star
+            else occupation_step(2, "Cusp Sub Lord Occupation", sub_lord, 3),
+        ownership_step(3, "Star Lord Ownership", star_lord, 2),
+        repeated_step(4, "Cusp Sub Lord Ownership", sub_lord, 1, 3) if own_star
+            else ownership_step(4, "Cusp Sub Lord Ownership", sub_lord, 1),
     ]
     return steps, sum(s["step_points"] for s in steps)
 
+def decide_verdict(score, steps, is_retrograde, deciding_planet):
+    """
+    Turns the score into a verdict.
+      * Definitive thresholds are +-6.
+      * With the step weights (4/3/2/1) a score of +-6 or more can only happen when the two
+        occupation steps (the strongest KP levels) agree with it, so no extra guard is needed.
+      * A retrograde deciding planet means delay/obstruction: it can never be DEFINITIVE YES.
+    """
+    classes = [r["classification"] for st in steps for r in st["house_results"]]
+    has_pos, has_neg = "positive" in classes, "negative" in classes
+    retro_note = (f" The deciding planet ({deciding_planet}) is retrograde, so expect delay or obstruction."
+                  if is_retrograde else "")
+
+    if score >= 6:
+        if is_retrograde:
+            return (f"YES WITH DELAYS. Positives dominate (Score: +{score}) but the deciding planet "
+                    f"({deciding_planet}) is retrograde, so the result cannot be called definitive. "
+                    f"Expect success only after delay or obstacles.")
+        return f"DEFINITIVE YES. Strong positive dominance (Score: +{score}). Success is highly likely."
+    if 1 <= score <= 5:
+        return (f"YES WITH DELAYS. Positives slightly outweigh negatives (Score: +{score}). "
+                f"Expect success but with obstacles." + retro_note)
+    if score == 0:
+        if has_pos and has_neg:
+            return ("MIXED / CONFLICTING. Supporting and opposing influences cancel out (Score: 0). "
+                    "The outcome is uncertain and may swing either way." + retro_note)
+        return ("MIXED / UNCLEAR. The chart shows no strong link to the houses of this question (Score: 0). "
+                "The outcome cannot be judged from this chart." + retro_note)
+    if -5 <= score <= -1:
+        return f"UNFAVORABLE / NO. Negatives overpower positives or lack strong support (Score: {score})."
+    return f"DEFINITIVE NO. Strong negative dominance (Score: {score}). The chart denies the event."
+
 # --- THE MASTER PIPELINE ---
-def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
+def execute_kp_reading(city, horary_number, positive_houses, negative_houses, key_house=None):
     def _parse_houses(h_input):
         if not h_input: return set()
         if isinstance(h_input, list): return set(int(str(x).strip()) for x in h_input if str(x).strip().isdigit())
@@ -231,8 +298,16 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     positive_set = _parse_houses(positive_houses)
     negative_set = _parse_houses(negative_houses)
 
+    # The "key house": the cusp whose SUB LORD decides this kind of question (default 11 = fulfilment of desire)
+    try:
+        key_house = int(key_house)
+    except (TypeError, ValueError):
+        key_house = 11
+    if not 1 <= key_house <= 12:
+        key_house = 11
+
     lat, lon = location_engine.get_coordinates(city)
-    if not lat: return {"error": "Location not found or GPS block active."}
+    if lat is None or lon is None: return {"error": "Location not found or GPS block active."}
     
     asc_data = kp_math.get_horary_chart(horary_number)
     if "error" in asc_data: return asc_data
@@ -253,7 +328,15 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     planets, retrogrades = transit_engine.get_live_planets()
     planet_houses = {p: kp_math.get_house_from_cusps(lon_val, cusps) for p, lon_val in planets.items()}
     planet_facts = build_planet_facts(planets, retrogrades, cusps, ownership)
-    
+
+    # --- 4. The deciding planet: SUB LORD of the key house's cusp, read through the star it sits in ---
+    key_cusp = cusp_facts[key_house - 1]
+    cusp_sub_lord = key_cusp["sub_lord"]
+    deciding_planet = get_true_agent(cusp_sub_lord, planets)              # Rahu/Ketu act through their agent
+    deciding_star_raw = kp_math.get_star_lord(planets[deciding_planet])   # the star the PLANET sits in (not the cusp's star)
+    deciding_star = get_true_agent(deciding_star_raw, planets)
+    is_retrograde = bool(retrogrades.get(deciding_planet, False))
+
     live_asc = get_live_ascendant(lat, lon)
     rp_asc_sign_lord = get_sign_lord(live_asc)
     rp_asc_star_lord = get_star_lord(live_asc)
@@ -267,34 +350,40 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
     if dist > 180: dist = 360 - dist
     punarphoo_active = dist <= 3.33 
 
-    true_sl_star_lord = get_true_agent(horary_star_lord, planets)
-    true_sub_lord = get_true_agent(horary_sub_lord, planets)
-    is_retrograde = bool(retrogrades.get(true_sl_star_lord, False))
-    
-    # --- 4. Scoring, fully in Python ---
-    step_breakdown, score = compute_step_breakdown(
-        true_sl_star_lord, true_sub_lord, planet_houses, ownership, planets, positive_set, negative_set
-    )
+    # Ruling-planet confirmation (informational only - it does not change the score)
+    rp_names = {rp_asc_sign_lord, rp_asc_star_lord, get_sign_lord(moon_lon), get_star_lord(moon_lon), day_lord}
+    sub_in_rp = cusp_sub_lord in rp_names or deciding_planet in rp_names
+    star_in_rp = deciding_star_raw in rp_names or deciding_star in rp_names
+    rp_text = (f"Ruling planet check (confirmation only, not scored): Cusp Sub Lord {deciding_planet} is "
+               f"{'' if sub_in_rp else 'not '}among the ruling planets; its Star Lord {deciding_star} is "
+               f"{'' if star_in_rp else 'not '}among the ruling planets.")
 
-    step_1_house = planet_houses.get(true_sl_star_lord, 0)
-    step_2_houses = get_houses_owned_by_planet(true_sl_star_lord, ownership, planets)
-    step_3_house = planet_houses.get(true_sub_lord, 0)
-    step_4_houses = get_houses_owned_by_planet(true_sub_lord, ownership, planets)
-    all_signified_houses = [step_1_house] + step_2_houses + [step_3_house] + step_4_houses
-    
-    if is_retrograde:
-        verdict = "DENIED. The Star Lord is Retrograde (Vakri). The event will fail or be heavily delayed."
-    elif score >= 5:
-        verdict = f"DEFINITIVE YES. Strong positive dominance (Score: +{score}). Success is highly likely."
-    elif 1 <= score <= 4:
-        verdict = f"YES WITH DELAYS. Positives slightly outweigh negatives (Score: +{score}). Expect success but with obstacles."
-    elif -4 <= score <= 0:
-        verdict = f"UNFAVORABLE / NO. Negatives overpower positives or lack strong support (Score: {score})."
-    else:
-        verdict = f"DEFINITIVE NO. Strong negative dominance (Score: {score}). The chart denies the event."
+    # --- 5. Scoring and verdict, fully in Python ---
+    step_breakdown, score = compute_step_breakdown(
+        deciding_star, deciding_planet, planet_houses, ownership, planets, positive_set, negative_set
+    )
+    verdict = decide_verdict(score, step_breakdown, is_retrograde, deciding_planet)
+
+    step_1_house = planet_houses.get(deciding_star, 0)
+    step_2_house = planet_houses.get(deciding_planet, 0)
+    step_3_houses = get_houses_owned_by_planet(deciding_star, ownership, planets)
+    step_4_houses = get_houses_owned_by_planet(deciding_planet, ownership, planets)
+    all_signified_houses = [step_1_house, step_2_house] + step_3_houses + step_4_houses
 
     house_ownership_text = {
         p: f"{p} owns {kp_math.format_house_list(hs)}" for p, hs in ownership.items()
+    }
+
+    decision = {
+        "key_house": key_house,
+        "key_house_cusp": key_cusp["summary"],
+        "cusp_sub_lord": cusp_sub_lord,
+        "deciding_planet": deciding_planet,
+        "deciding_planet_star_lord": deciding_star,
+        "deciding_planet_is_retrograde": is_retrograde,
+        "note": (f"{cusp_sub_lord} is a node and acts through its agent {deciding_planet}. " if cusp_sub_lord != deciding_planet else "")
+                + (f"{deciding_planet} sits in its own star, so its occupation and ownership are counted once."
+                   if deciding_star == deciding_planet else ""),
     }
 
     # Text-only payload for the LLM: no raw longitudes, nothing left to calculate.
@@ -307,10 +396,14 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
             "number": horary_number,
             "ascendant_sign": horary_sign,
             "ascendant_sign_lord": horary_asc_lord,
-            "star_lord": horary_star_lord,
-            "sub_lord": horary_sub_lord,
-            "true_star_lord_agent": true_sl_star_lord,
-            "true_sub_lord_agent": true_sub_lord,
+            "ascendant_star_lord": horary_star_lord,
+            "ascendant_sub_lord": horary_sub_lord,
+        },
+        "decision": decision,
+        "ruling_planet_check": {
+            "cusp_sub_lord_in_ruling_planets": sub_in_rp,
+            "star_lord_in_ruling_planets": star_in_rp,
+            "text": rp_text,
         },
         "target_positive_houses": sorted(positive_set),
         "target_negative_houses": sorted(negative_set),
@@ -334,6 +427,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
         "sub_lord": horary_sub_lord, "star_lord": horary_star_lord, "is_retrograde": is_retrograde,
         "all_houses": list(set(all_signified_houses)), "moon_star_lord": get_star_lord(moon_lon),
         "punarphoo": punarphoo_active,
+        "key_house": key_house, "cusp_sub_lord": cusp_sub_lord, "deciding_planet": deciding_planet,
         "horary_chart": {
             "number": horary_number,
             "sign": horary_sign,
@@ -343,11 +437,11 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses):
             "sub_lord": horary_sub_lord
         },
         "significators": {
-            "true_star_lord": true_sl_star_lord,
-            "true_sub_lord": true_sub_lord,
+            "true_star_lord": deciding_star,
+            "true_sub_lord": deciding_planet,
             "step_1_house": step_1_house,
-            "step_2_houses": step_2_houses,
-            "step_3_house": step_3_house,
+            "step_2_house": step_2_house,
+            "step_3_houses": step_3_houses,
             "step_4_houses": step_4_houses
         },
         "step_breakdown": step_breakdown,
