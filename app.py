@@ -76,7 +76,8 @@ st.markdown("""<div style="margin:70px 0 0;padding:70px 24px;text-align:center;
   </div>""", unsafe_allow_html=True)
 c1, c2, c3 = st.columns([1, 1, 1])
 with c2:
-    st.page_link("pages/1_Astroman_AI.py", label="Ask Your Question")
+    if st.button("Ask Your Question", type="primary", use_container_width=True):
+        st.switch_page("pages/1_Astroman_AI.py")
 
 # ------------------------------------------------------- reviews -------
 ui.section_head("Voices", "What seekers say",
@@ -102,7 +103,8 @@ st.markdown("</div></div>", unsafe_allow_html=True)
 st.markdown("<div class='wrap' style='text-align:center;margin-top:22px'>", unsafe_allow_html=True)
 c1, c2, c3 = st.columns([1, 1, 1])
 with c2:
-    st.page_link("pages/3_Reviews.py", label="Read all reviews")
+    if st.button("Read all reviews", use_container_width=True):
+        st.switch_page("pages/3_Reviews.py")
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------- paid ----------
