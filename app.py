@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import streamlit as st
 from lib import ui_premium as ui
 from lib import icons
-from lib import mock
+from lib import sheets
 
 st.set_page_config(page_title="Astroman AI · KP Prashna Kundli", page_icon="✦", layout="wide")
 ui.inject()
@@ -57,11 +57,14 @@ st.markdown("</div>", unsafe_allow_html=True)
 ui.section_head("See it work", "A sample reading",
                 "This is exactly what you receive — verdict, score, chart, and timing. Try it live below.")
 st.markdown("<div class='wrap-narrow'>", unsafe_allow_html=True)
-rd = mock.SAMPLE_READING
-ui.verdict_card(rd["headline"], rd["story"], rd["kp_score"], rd["score_band"])
+ui.verdict_card("YES — but with some delays on the way",
+                "The answer leans YES, but the chart also shows friction — a slow planet, a "
+                "retrograde influence, or a competing house. Expect the result, but give it "
+                "time and don't panic at the first obstacle.",
+                5, "Score +5 (scale -8 to +8): Positive — the balance of forces is with you.")
 st.markdown("</div>", unsafe_allow_html=True)
 st.markdown("""<div class="wrap" style="text-align:center;margin-top:26px">
-  <p class="muted">Sample data shown. Your real reading is cast fresh for your question.</p></div>""",
+  <p class="muted">Illustrative example. Your real reading is cast fresh for your question.</p></div>""",
             unsafe_allow_html=True)
 
 # ------------------------------------------------------- CTA band -------
@@ -76,15 +79,31 @@ with c2:
     st.page_link("pages/1_Astroman_AI.py", label="Ask Your Question")
 
 # ------------------------------------------------------- reviews -------
-ui.section_head("Voices", "What seekers say", "Sample reviews — the live wall arrives with Organ 3.")
+ui.section_head("Voices", "What seekers say",
+                "Real reviews, approved by hand after each seeker confirmed their outcome.")
+_live_reviews = sheets.get_reviews(limit=3) if sheets.is_configured() else []
 st.markdown("<div class='wrap'><div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:26px'>",
             unsafe_allow_html=True)
-for r in mock.SAMPLE_REVIEWS:
-    stars = icons.star(16)
-    st.markdown(f"""<div class="pcard reveal">{stars * r['stars']}
-      <p style="line-height:1.75;font-style:italic">“{r['text']}”</p>
-      <div class="muted">— {r['name']}</div></div>""", unsafe_allow_html=True)
+if _live_reviews:
+    for r in _live_reviews:
+        try:
+            _stars = max(1, min(5, int(r.get("rating") or 5)))
+        except (TypeError, ValueError):
+            _stars = 5
+        st.markdown(f"""<div class="pcard reveal"><div class="gold-text">{'★' * _stars}{'☆' * (5 - _stars)}</div>
+          <p style="line-height:1.75;font-style:italic">"{r.get('text', '')}"</p>
+          <div class="muted">— {r.get('name', 'A seeker')}</div></div>""", unsafe_allow_html=True)
+else:
+    st.markdown("""<div class="pcard reveal" style="text-align:center">
+      <p class="muted" style="line-height:1.7">No reviews yet — yours could be the first.<br>
+      Get a free reading, tell us what actually happened, and your words appear here.</p></div>""",
+                unsafe_allow_html=True)
 st.markdown("</div></div>", unsafe_allow_html=True)
+st.markdown("<div class='wrap' style='text-align:center;margin-top:22px'>", unsafe_allow_html=True)
+c1, c2, c3 = st.columns([1, 1, 1])
+with c2:
+    st.page_link("pages/3_Reviews.py", label="Read all reviews")
+st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------- paid ----------
 st.markdown("""<div class="wrap"><div class="pcard reveal" style="text-align:center;margin-top:44px">
