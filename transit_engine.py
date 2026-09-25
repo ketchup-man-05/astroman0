@@ -1,11 +1,16 @@
 import swisseph as swe
 from datetime import datetime, timezone
 
-def get_live_planets():
-    """Returns planet longitudes AND Retrograde status using strict KP Ayanamsha."""
-    now = datetime.now(timezone.utc)
-    decimal_hour = now.hour + (now.minute / 60.0) + (now.second / 3600.0)
-    jd = swe.julday(now.year, now.month, now.day, decimal_hour)
+def get_planets_at(when):
+    """Planet longitudes AND retrograde flags at `when` (aware datetime; naive is read as UTC),
+    using strict KP Ayanamsha. Powers both the live-planet header and the transit check at a
+    future supportive window."""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    else:
+        when = when.astimezone(timezone.utc)
+    decimal_hour = when.hour + (when.minute / 60.0) + (when.second / 3600.0)
+    jd = swe.julday(when.year, when.month, when.day, decimal_hour)
     
     # CRITICAL: Must be Krishnamurti for KP Horary Sub-Lord accuracy
     swe.set_sid_mode(swe.SIDM_KRISHNAMURTI)
@@ -13,7 +18,7 @@ def get_live_planets():
     planets = {
         "Sun": swe.SUN, "Moon": swe.MOON, "Mars": swe.MARS, 
         "Mercury": swe.MERCURY, "Jupiter": swe.JUPITER, 
-        "Venus": swe.VENUS, "Saturn": swe.SATURN, "Rahu": swe.MEAN_NODE
+        "Venus": swe.VENUS, "Saturn": swe.SATURN, "Rahu": swe.TRUE_NODE
     }
     
     positions = {}
@@ -35,5 +40,10 @@ def get_live_planets():
     # Ketu is exactly 180 degrees from Rahu
     positions["Ketu"] = (positions["Rahu"] + 180) % 360
     retrogrades["Ketu"] = False
-    
+
     return positions, retrogrades
+
+
+def get_live_planets():
+    """Returns planet longitudes AND Retrograde status using strict KP Ayanamsha."""
+    return get_planets_at(datetime.now(timezone.utc))

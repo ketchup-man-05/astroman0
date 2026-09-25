@@ -1,0 +1,30 @@
+[
+  {
+    "id": "TEMPLATE-1",
+    "enabled": false,
+    "source": "WRITE WHERE THIS CASE IS PUBLISHED (book / page / URL)",
+    "question": "Will the candidate win the election?",
+    "query_utc": "1990-01-01T10:30:00Z",
+    "city": "Chennai",
+    "lat": 13.0827,
+    "lon": 80.2707,
+    "number": 123,
+    "topic": "general",
+    "expected": "YES"
+  },
+  {
+    "id": "TEMPLATE-2",
+    "enabled": false,
+    "source": "Use explicit houses instead of a topic if the published case does",
+    "question": "Will the loan be sanctioned?",
+    "query_utc": "1990-06-01T04:00:00Z",
+    "city": "Delhi",
+    "lat": 28.6139,
+    "lon": 77.2090,
+    "number": 87,
+    "positive": [2, 6, 11],
+    "negative": [5, 8, 12],
+    "key_house": 11,
+    "expected": "NO"
+  }
+]

@@ -24,7 +24,9 @@ ABSOLUTELY FORBIDDEN - you must NEVER:
 - Decide which house a planet occupies.
 - Calculate, add up, adjust, or re-derive any point score. Never do your own arithmetic on the chart.
 - Claim a planet became the Cusp Sub Lord or its Star Lord for any reason of your own. They are calculated by the Python engine from the chart and supplied in the "decision" field.
-- Invent remedies, behavioral advice, or timing predictions.
+- Invent remedies or behavioral advice.
+- Predict, estimate, shift, or infer any date or period yourself. The ONLY timing you may report is the engine-calculated "timing" field in the JSON.
+- Soften, remove, or second-guess the "retrograde_rule_note" or the Ruling-Planet caution text already appended to "verdict" - copy them exactly as given.
 - Use outside astrological knowledge to fill gaps or to contradict the JSON.
 
 REQUIRED - you must ONLY:
@@ -32,24 +34,38 @@ REQUIRED - you must ONLY:
 - Use "kp_score" exactly as given, and the "text" lines in "step_breakdown" for each step's math.
 - If "is_retrograde" is true, state that the deciding planet (the Cusp Sub Lord) is retrograde, which indicates delay or obstruction, as already reflected in the verdict.
 - If "punarphoo" is true, mention the Saturn-Moon conjunction causing mental anxiety or delay.
+- If a "timing" field is present, copy its dasha/bhukti lords, dates, and "text" lines exactly as written. If "timing" contains an "error", say that timing is unavailable for this chart.
 - If something is not in the JSON, say that the chart data does not contain it. Do not work it out.
 
 If the numbers seem unusual to you, present them anyway. The JSON is the single source of truth."""
 
 import re
 
+# Words that would otherwise prefix-match an unrelated longer word (pass -> passport) get an
+# explicit "not followed by this" exception instead of the default open-ended prefix match.
+_PREFIX_EXCEPTIONS = {"pass": "port"}
+
 def _has_any(text, words):
     """Whole-word keyword match (so 'land' does not match 'England', 'test' not 'latest').
     Words of 3 letters or fewer must match exactly (optional plural 's'); longer words
     match from the start of a word, so 'recover' also catches 'recovered' and 'marri'
-    catches 'married'/'marriage'."""
+    catches 'married'/'marriage'. A word in _PREFIX_EXCEPTIONS also excludes its listed
+    continuation (e.g. 'pass' matches 'passed'/'passing' but not 'passport')."""
     for w in words:
-        pattern = rf"\b{w}s?\b" if len(w) <= 3 else rf"\b{w}"
+        if w in _PREFIX_EXCEPTIONS:
+            pattern = rf"\b{w}(?!{_PREFIX_EXCEPTIONS[w]})\w*\b"
+        elif len(w) <= 3:
+            pattern = rf"\b{w}s?\b"
+        else:
+            pattern = rf"\b{w}"
         if re.search(pattern, text):
             return True
     return False
 
-# Order matters: the first topic whose keywords match wins (same order as before).
+# Most keyword hits wins; ties keep the original topic order.
+def _count_hits(text, words):
+    """Number of distinct topic keywords matching (same rules as _has_any)."""
+    return sum(1 for w in words if _has_any(text, [w]))
 TOPICS = [
     ("career",   ["job", "career", "promotion", "work", "interview", "salary", "business",
                   "employ", "hire", "hiring", "startup"],
@@ -72,7 +88,8 @@ TOPICS = [
                  [4, 9, 11], [3, 8], 4),
     ("children", ["child", "pregnan", "baby", "babies", "conceiv"],
                  [2, 5, 11], [1, 4, 10], 5),
-    ("court",    ["court", "lawsuit", "litigation", "case", "legal", "dispute", "lawyer", "judge"],
+    ("court",    ["court", "lawsuit", "litigation", "legal", "dispute", "lawyer", "judge",
+                  "court case", "legal case", "criminal case", "civil case"],
                  [6, 11], [12], 6),
 ]
 DEFAULT_HOUSES = ([2, 11], [8, 12])   # money / general - used when nothing matches
@@ -105,9 +122,14 @@ def get_query_houses(user_question, topic=None):
                 return {"positive_houses": list(pos), "negative_houses": list(neg), "key_house": kh}
 
     text = user_question.lower()
-    for _, keywords, pos, neg, kh in TOPICS:
-        if _has_any(text, keywords):
-            return {"positive_houses": list(pos), "negative_houses": list(neg), "key_house": kh}
+    best = None  # (hits, order, pos, neg, key_house)
+    for order, (_, keywords, pos, neg, kh) in enumerate(TOPICS):
+        hits = _count_hits(text, keywords)
+        if hits and (best is None or hits > best[0]):
+            best = (hits, order, pos, neg, kh)
+    if best is not None:
+        _, _, pos, neg, kh = best
+        return {"positive_houses": list(pos), "negative_houses": list(neg), "key_house": kh}
     return {"positive_houses": list(DEFAULT_HOUSES[0]), "negative_houses": list(DEFAULT_HOUSES[1]), "key_house": DEFAULT_KEY_HOUSE}
 
 def handle_incoming_message(session_id, user_message, city=None, horary_number=None, topic=None):
@@ -148,6 +170,22 @@ def handle_incoming_message(session_id, user_message, city=None, horary_number=N
         # The LLM only ever sees the pre-calculated, text-only facts.
         ai_facts = chart_data["ai_facts"]
 
+        has_timing = bool(ai_facts.get("timing"))
+        section_count = "three sections" if has_timing else "two sections"
+        timing_instructions = ""
+        if has_timing:
+            timing_instructions = """
+### 3. Timing (Vimshottari dasha at the query moment)
+- State the Moon's sign, star lord, and the Mahadasha at the chart moment with its balance, copied from "timing.moon".
+- Reproduce the "text" line of "timing.active" as the current period, and say whether "qualifies" is true or false.
+- Reproduce the "text" line of "timing.next_supportive" as the next supporting period. If it is null, say no supporting period was found in the searched range.
+- If "timing.upcoming_supportive" has more entries, list their "text" lines in order.
+- For each entry in "timing.upcoming_supportive", also reproduce its "antara_text" line right after its "text" line.
+- Reproduce the "text" line of "timing.next_supportive_antara" as the finest supportive window. If it is null, say no supportive antara was found in the searched range.
+- If "timing.active" has an "antara_text" field, reproduce it as the currently running antara.
+- If "transit_confirmation" is present and has no "error", reproduce its "text" as a gochar cross-check and state its "classification"; say plainly that it does not change the verdict. If it has an "error" or an "at_next_antara" entry, mention the future-window check briefly.
+- Copy "timing.note" exactly. Do not estimate or adjust any date. If "timing" contains an "error", write only that timing is unavailable.
+"""
         initial_prompt = f"""
 User Question: "{user_message}"
 Location: {city}
@@ -156,10 +194,10 @@ Horary Number: {horary_number}
 PRE-CALCULATED FACTS (computed by Python; do not recalculate anything):
 {json.dumps(ai_facts, indent=2)}
 
-Write your response in exactly two sections using Markdown headers:
+Write your response in exactly {section_count} using Markdown headers:
 
 ### 1. The Verdict
-Give a bolded "YES", "NO", or "MIXED" that matches the "verdict" field (DEFINITIVE YES / YES WITH DELAYS -> YES; UNFAVORABLE / NO / DEFINITIVE NO -> NO; MIXED / CONFLICTING or MIXED / UNCLEAR -> MIXED).
+Give a bolded "YES", "NO", "MIXED", or "DELAYED" that matches the "verdict" field (DEFINITIVE YES / YES WITH DELAYS -> YES; UNFAVORABLE / NO / DEFINITIVE NO -> NO; MIXED / CONFLICTING or MIXED / UNCLEAR -> MIXED; DELAYED, NOT DENIED -> DELAYED, and explain in one line that this project treats retrograde as a delay signal, not a denial). If "decision.ruling_planet_support" is false and the verdict is YES-leaning, keep the caution sentence that is already appended to "verdict" - do not drop it for brevity.
 Then state the score in exactly this format: "Final KP Score: {ai_facts['kp_score']}"
 
 ### 2. KP Mathematical Breakdown
@@ -168,8 +206,8 @@ Then state the score in exactly this format: "Final KP Score: {ai_facts['kp_scor
 - State the target positive houses and negative houses exactly as listed.
 - Apply the retrograde and Punarphoo rules if the flags are true.
 - Include the "ruling_planet_check" text line exactly as written; it is confirmation only and does not change the score.
-- Do not add remedies, advice, or timing predictions.
-"""
+- Do not add remedies or advice.
+{timing_instructions}"""
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": initial_prompt},

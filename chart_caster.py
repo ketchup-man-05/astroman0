@@ -3,6 +3,9 @@ from datetime import datetime, timezone, timedelta
 import re
 import kp_math
 import location_engine
+import ephemeris_utils
+import kp_logger
+import timing_engine
 import transit_engine
 
 # --- CORE SETTINGS ---
@@ -25,9 +28,18 @@ def get_sign_lord(degree):
 def get_star_lord(degree):
     return kp_math.get_star_lord(degree)
 
-def get_true_agent(planet, planets_dict):
-    if planet not in NODES: return planet
-    node_lon = planets_dict.get(planet, 0)
+def get_node_agent_info(node, planets_dict):
+    """
+    Which planet Rahu/Ketu act through. Priority order (KP Reader VI cascade):
+      1. a planet conjunct the node within 3deg20' (the closest one wins; other node excluded)
+      2. the node's own Star Lord, if that is a classical planet (not the other node / itself)
+      3. a classical planet aspecting the node within 3deg20' (Vedic aspects: all planets
+         aspect the 7th; Mars also 4th/8th; Jupiter 5th/9th; Saturn 3rd/10th; nodes do not
+         aspect; closest one wins)
+      4. the Sign Lord of the node's position (last resort)
+    Returns (agent, rule_name, human-readable explanation).
+    """
+    node_lon = planets_dict.get(node, 0)
     nearest, nearest_dist = None, None
     for p_name, p_lon in planets_dict.items():
         if p_name not in NODES:
@@ -35,8 +47,32 @@ def get_true_agent(planet, planets_dict):
             if dist > 180: dist = 360 - dist
             if dist <= 3.33 and (nearest_dist is None or dist < nearest_dist):
                 nearest, nearest_dist = p_name, dist
-    if nearest is not None: return nearest  # closest planet within 3.33 deg wins
-    return get_sign_lord(node_lon)
+    if nearest is not None:
+        return nearest, "conjunction", f"{nearest} is conjunct {node} within 3.33 degrees ({nearest_dist:.2f} deg)"
+    star = get_star_lord(node_lon)
+    if star not in NODES:
+        return star, "star lord", f"no planet conjunct {node}; {node} sits in the star of {star}"
+    _ASPECTS = {"Sun": (180,), "Moon": (180,), "Mars": (180, 90, 240),
+                "Mercury": (180,), "Jupiter": (180, 120, 240),
+                "Venus": (180,), "Saturn": (180, 60, 270)}
+    asp_nearest, asp_dist = None, None
+    for p_name, p_lon in planets_dict.items():
+        if p_name in NODES:
+            continue
+        d = (node_lon - p_lon) % 360
+        for a in _ASPECTS.get(p_name, (180,)):
+            off = abs(d - a)
+            if off <= 3.33 and (asp_dist is None or off < asp_dist):
+                asp_nearest, asp_dist = p_name, off
+    if asp_nearest is not None:
+        return asp_nearest, "aspect", (f"no planet conjunct {node} and its star lord {star} is a node; "
+                                       f"{asp_nearest} aspects {node} (orb {asp_dist:.2f} deg)")
+    sign_lord = get_sign_lord(node_lon)
+    return sign_lord, "sign lord", (f"no planet conjunct or aspecting {node}; its Star Lord {star} is a node, "
+                                    f"so the Sign Lord {sign_lord} is used as last resort")
+def get_true_agent(planet, planets_dict):
+    if planet not in NODES: return planet
+    return get_node_agent_info(planet, planets_dict)[0]
 
 def get_sign_index(degree):
     return int((degree % 360) // 30)
@@ -50,60 +86,67 @@ def get_houses_owned_by_planet(planet, ownership, planets_dict):
     agent = get_true_agent(planet, planets_dict)
     return list(ownership.get(agent, []))
 
-def calculate_placidus_cusps(target_ascendant, lat, lon):
+def _asc_diff(jd, lat, lon, target):
+    """Signed difference (-180..180) between the Ascendant at jd and the target. Positive = Asc is ahead."""
+    _, ascmc = swe.houses_ex(jd, lat, lon, b'P', swe.FLG_SIDEREAL)
+    return (ascmc[0] - target + 180) % 360 - 180
+
+def find_horary_moment(target_ascendant, lat, lon, ref_jd, half_window_days=0.5, step_minutes=7.5):
     """
-    Finds the moment (within today's 24h UT window) whose Ascendant equals
-    target_ascendant, then returns the 12 Placidus cusps for that moment.
+    Finds the moment whose Ascendant equals target_ascendant, searching +-12h around ref_jd
+    (the moment of the query) and returning the crossing NEAREST to ref_jd.
 
-    Uses bisection instead of a brute-force minute/second scan: the real
-    Ascendant is monotonically increasing in time (it never runs backward),
-    so a coarse scan just needs to find which bracket the target falls in,
-    then bisection narrows it to sub-second precision in ~10-15 more calls.
+    The old version searched 'today's UTC calendar day', so the moment could land many hours
+    from the real query time. A +-12h window always contains the nearest crossing (the Ascendant
+    passes any degree about once per 23h56m). Raises ValueError if none is found instead of
+    silently returning a meaningless time.
     """
-    now = datetime.now(timezone.utc)
-    base_jd = swe.julday(now.year, now.month, now.day, 0.0)
+    n = int((2 * half_window_days * 24 * 60) / step_minutes)
+    step = (2 * half_window_days) / n
+    t0 = ref_jd - half_window_days
 
-    def signed_diff(jd):
-        cusps, ascmc = swe.houses_ex(jd, lat, lon, b'P', swe.FLG_SIDEREAL)
-        # signed difference in [-180, 180), positive = ascendant is ahead of target
-        d = (ascmc[0] - target_ascendant + 180) % 360 - 180
-        return d, cusps, ascmc
+    brackets = []
+    prev_jd = t0
+    prev_d = _asc_diff(prev_jd, lat, lon, target_ascendant)
+    for i in range(1, n + 1):
+        jd = t0 + i * step
+        d = _asc_diff(jd, lat, lon, target_ascendant)
+        # Ascendant moves forward, so we look for negative -> positive; ignore the 360->0 wrap jump
+        if prev_d <= 0 <= d and abs(d - prev_d) < 180:
+            brackets.append((prev_jd, jd))
+        prev_jd, prev_d = jd, d
 
-    n_coarse = 96  # 15-minute steps across the day
-    step = 1.0 / n_coarse
+    if not brackets:
+        raise ValueError(f"No moment found with Ascendant {target_ascendant:.4f} within +-{half_window_days*24:.0f}h of the query")
 
-    prev_jd = base_jd
-    prev_diff, _, _ = signed_diff(prev_jd)
-    lo, hi = None, None
+    best = None
+    for lo, hi in brackets:
+        lo_d = _asc_diff(lo, lat, lon, target_ascendant)
+        for _ in range(80):
+            mid = (lo + hi) / 2.0
+            d = _asc_diff(mid, lat, lon, target_ascendant)
+            if (d > 0) == (lo_d > 0):
+                lo, lo_d = mid, d
+            else:
+                hi = mid
+            if (hi - lo) < (0.01 / 86400.0):   # 0.01 second
+                break
+        moment = (lo + hi) / 2.0
+        if best is None or abs(moment - ref_jd) < abs(best - ref_jd):
+            best = moment
+    return best
 
-    for i in range(1, n_coarse + 1):
-        jd = base_jd + i * step
-        diff, _, _ = signed_diff(jd)
-        crossed = (prev_diff <= 0 <= diff) or (prev_diff >= 0 >= diff)
-        # ignore the 360->0 wrap itself, which also looks like a sign flip
-        if crossed and abs(diff - prev_diff) < 180:
-            lo, hi = prev_jd, jd
-            break
-        prev_jd, prev_diff = jd, diff
+def calculate_horary_cusps(target_ascendant, lat, lon, ref_jd):
+    """Returns (12 Placidus cusps, JD of the moment that Ascendant rises)."""
+    jd = find_horary_moment(target_ascendant, lat, lon, ref_jd)
+    cusps, _ = swe.houses_ex(jd, lat, lon, b'P', swe.FLG_SIDEREAL)
+    return list(cusps)[-12:], jd
 
-    if lo is None:
-        lo, hi = base_jd, base_jd + 1.0
-
-    lo_diff, _, _ = signed_diff(lo)
-    mid = lo
-    for _ in range(30):
-        mid = (lo + hi) / 2.0
-        mid_diff, cusps, ascmc = signed_diff(mid)
-        if (mid_diff > 0) == (lo_diff > 0):
-            lo, lo_diff = mid, mid_diff
-        else:
-            hi = mid
-        if (hi - lo) < (0.5 / 86400.0):  # sub-second precision reached
-            break
-
-    final_cusps, _ = swe.houses_ex(mid, lat, lon, b'P', swe.FLG_SIDEREAL)
-    # pyswisseph returns 12 cusps (index 0 = house 1); guard in case a 13-item tuple appears
-    return list(final_cusps)[-12:]
+def calculate_placidus_cusps(target_ascendant, lat, lon, ref_jd=None):
+    """Backward-compatible wrapper: returns only the cusps."""
+    if ref_jd is None:
+        ref_jd = ephemeris_utils.to_jd(datetime.now(timezone.utc))
+    return calculate_horary_cusps(target_ascendant, lat, lon, ref_jd)[0]
 
 def get_panchang_tithi(sun_lon, moon_lon):
     diff = (moon_lon - sun_lon) % 360
@@ -111,16 +154,15 @@ def get_panchang_tithi(sun_lon, moon_lon):
     paksha = "Shukla (Waxing)" if tithi_index < 15 else "Krishna (Waning)"
     return f"{paksha} {TITHIS[tithi_index]}"
 
-def get_current_day_lord(lon):
+def get_current_day_lord(lon, as_of=None):
     offset_hours = lon / 15.0
-    local_time = datetime.now(timezone.utc) + timedelta(hours=offset_hours)
+    local_time = (as_of or datetime.now(timezone.utc)) + timedelta(hours=offset_hours)
     sun_index = (local_time.weekday() + 1) % 7
     if local_time.hour < 6: sun_index = (sun_index - 1) % 7
     return DAYS[sun_index], DAY_LORDS[sun_index]
 
-def get_live_ascendant(lat, lon):
-    now = datetime.now(timezone.utc)
-    jd_ut = swe.julday(now.year, now.month, now.day, now.hour + now.minute/60.0 + now.second/3600.0)
+def get_live_ascendant(lat, lon, as_of=None):
+    jd_ut = ephemeris_utils.to_jd(as_of or datetime.now(timezone.utc))
     cusps, ascmc = swe.houses_ex(jd_ut, lat, lon, b'P', swe.FLG_SIDEREAL)
     return ascmc[0]
 
@@ -249,25 +291,28 @@ def compute_step_breakdown(star_lord, sub_lord, planet_houses, ownership, planet
     ]
     return steps, sum(s["step_points"] for s in steps)
 
-def decide_verdict(score, steps, is_retrograde, deciding_planet):
+def decide_verdict(score, steps, is_retrograde, deciding_planet, retro_who=""):
     """
     Turns the score into a verdict.
       * Definitive thresholds are +-6.
       * With the step weights (4/3/2/1) a score of +-6 or more can only happen when the two
         occupation steps (the strongest KP levels) agree with it, so no extra guard is needed.
-      * A retrograde deciding planet means delay/obstruction: it can never be DEFINITIVE YES.
+      * Retrogression is treated as a DELAY indicator, never as a denial (this is a deliberate
+        project choice: classical sources are split on whether retrograde denies or only delays
+        an event - see decision.retrograde_rule_note - so this bot always reads it as delay).
+      * is_retrograde is true if the deciding planet OR its Star Lord is retrograde; retro_who
+        names which one(s), for the text below.
     """
     classes = [r["classification"] for st in steps for r in st["house_results"]]
     has_pos, has_neg = "positive" in classes, "negative" in classes
-    retro_note = (f" The deciding planet ({deciding_planet}) is retrograde, so expect delay or obstruction."
-                  if is_retrograde else "")
+    who = retro_who or deciding_planet
+    retro_note = f" {who} is retrograde, so expect delay or obstruction." if is_retrograde else ""
 
     if score >= 6:
         if is_retrograde:
-            return (f"YES WITH DELAYS. Positives dominate (Score: +{score}) but the deciding planet "
-                    f"({deciding_planet}) is retrograde, so the result cannot be called definitive. "
-                    f"Expect success only after delay or obstacles.")
-        return f"DEFINITIVE YES. Strong positive dominance (Score: +{score}). Success is highly likely."
+            return (f"YES WITH DELAYS. Positives dominate (Score: +{score}) but {who} is retrograde, "
+                    f"so the result cannot be called definitive. Expect success only after delay or obstacles.")
+        return f"DEFINITIVE YES. Strong positive dominance (Score: +{score}). Success is likely, but no chart is infallible."
     if 1 <= score <= 5:
         return (f"YES WITH DELAYS. Positives slightly outweigh negatives (Score: +{score}). "
                 f"Expect success but with obstacles." + retro_note)
@@ -277,12 +322,122 @@ def decide_verdict(score, steps, is_retrograde, deciding_planet):
                     "The outcome is uncertain and may swing either way." + retro_note)
         return ("MIXED / UNCLEAR. The chart shows no strong link to the houses of this question (Score: 0). "
                 "The outcome cannot be judged from this chart." + retro_note)
+    # score < 0: negative dominance
+    if is_retrograde:
+        return (f"DELAYED, NOT DENIED. The chart leans negative (Score: {score}), and {who} is retrograde. "
+                f"This project reads retrograde as delay rather than outright denial, so the matter is read as "
+                f"delayed, not refused - expect it to move only once {who} turns direct, or recheck with a "
+                f"fresh chart closer to the expected time.")
     if -5 <= score <= -1:
         return f"UNFAVORABLE / NO. Negatives overpower positives or lack strong support (Score: {score})."
-    return f"DEFINITIVE NO. Strong negative dominance (Score: {score}). The chart denies the event."
+    return (f"DEFINITIVE NO. Strong negative dominance (Score: {score}). The chart leans heavily "
+            f"against the event. Note: strongly negative charts have historically been the hardest to call, "
+            f"so read this as a strong lean, not a certainty.")
+
+def _verdict_class(verdict):
+    v = verdict.upper()
+    if v.startswith("DELAYED"): return "DELAYED"
+    if v.startswith("MIXED"): return "MIXED"
+    if v.startswith("UNFAVORABLE") or v.startswith("DEFINITIVE NO") or v.startswith("NO"): return "NO"
+    return "YES"
 
 # --- THE MASTER PIPELINE ---
-def execute_kp_reading(city, horary_number, positive_houses, negative_houses, key_house=None):
+def transit_confirmation(cusps, positive_set, key_house, deciding_planet, deciding_star,
+                         ruling_planets, planets_now, retrogrades_now=None):
+    """Gochar (transit) cross-check, read against the HORARY chart's own houses.
+
+    For the moment `planets_now` describes, finds where the chart's key significators are
+    transiting and whether that supports the question:
+      1. Transit Moon: its horary house, and whether its star/sub lord is one of the chart's
+         fruitful significators (deciding planet, deciding star lord, ruling planets).
+      2. Transit deciding planet: whether it transits a positive house.
+      3. Transit deciding star lord: whether it transits a positive house.
+      4. Ruling planets currently transiting the key house.
+    REPORT-ONLY: the classification never changes the verdict. Transits are read against the
+    horary chart's houses because this bot has no natal chart to read them against.
+    """
+    pos = set(positive_set)
+    rp = set(ruling_planets or [])
+    retro = retrogrades_now or {}
+    fruitful = {deciding_planet, deciding_star} | rp
+    checks = []  # (supportive: bool, text: str)
+
+    def house_of(p):
+        lon = planets_now.get(p)
+        if lon is None:
+            return None
+        try:
+            return kp_math.get_house_from_cusps(lon, cusps)
+        except Exception:
+            return None
+
+    def retro_note(p):
+        return " (retrograde in transit: delay indicated, not denial)" if retro.get(p) else ""
+
+    # 1. Transit Moon
+    m_lon = planets_now.get("Moon")
+    if m_lon is None:
+        checks.append((False, "Transit Moon position unavailable."))
+    else:
+        m_house = house_of("Moon")
+        m_star = kp_math.get_star_lord(m_lon)
+        m_sub = kp_math.get_sub_lord(m_lon)
+        links = [x for x in (m_star, m_sub) if x in fruitful]
+        ok = (m_house in pos) or bool(links)
+        why = ("transits a positive house" if m_house in pos else
+               "its star/sub lord is a fruitful significator (" + "/".join(links) + ")" if links else
+               "no link to the question houses")
+        checks.append((ok, f"Transit Moon in horary house {m_house} (star {m_star}, sub {m_sub}): "
+                           f"{'supportive' if ok else 'not supportive'} - {why}."))
+
+    # 2 & 3. Transit deciding planet and its star lord (distinct planets only).
+    seen = set()
+    for p, label in ((deciding_planet, "the deciding planet"), (deciding_star, "its Star Lord")):
+        if p in seen:
+            continue
+        seen.add(p)
+        h = house_of(p)
+        ok = h in pos
+        checks.append((ok, f"Transit {p} ({label}) in horary house {h}{retro_note(p)}: "
+                           f"{'supportive - transits a positive house' if ok else 'not in a positive house'}."))
+
+    # 4. Ruling planets transiting the key house.
+    key_transits = sorted(p for p in rp if p in planets_now and house_of(p) == key_house)
+    ok = bool(key_transits)
+    checks.append((ok, f"Ruling planets transiting the key {kp_math.ordinal(key_house)} house: "
+                       + (", ".join(key_transits) + " - supportive." if ok else "none - not supportive.")))
+
+    score = sum(1 for ok, _ in checks if ok)
+    total = len(checks)
+    ratio = score / total if total else 0
+    classification = "supportive" if ratio >= 0.75 else "mixed" if ratio >= 0.25 else "not supportive"
+    summary = (f"Transit check {score}/{total} supportive: the current gochar is {classification} of the "
+               f"question. This is a cross-check only and does not change the verdict.")
+    return {
+        "classification": classification, "score": f"{score}/{total}",
+        "findings": [t for _, t in checks], "text": " ".join(t for _, t in checks) + " " + summary,
+        "note": ("Transits are read against the horary chart's own houses (no natal chart is available). "
+                 "A retrograde transit indicates delay, never denial, per this project's convention."),
+    }
+
+
+def execute_kp_reading(city, horary_number, positive_houses, negative_houses, key_house=None,
+                       as_of=None, coords=None, chart_time_mode="query", log=True, include_timing=True):
+    """
+    as_of            : aware UTC datetime of the question (default: now). Lets you replay old charts.
+    coords           : (lat, lon) to skip the geocoder (used by tests/backtests).
+    chart_time_mode  : "query"  -> planets at the query moment, cusps from the number (KP convention, old behaviour)
+                       "horary" -> planets at the moment the number's Ascendant rises (cusps and planets share one moment)
+    log              : write one JSON file per reading to ./logs
+    include_timing   : add Vimshottari dasha/bhukti timing (timing_engine.py). False = skip it entirely.
+    """
+    if chart_time_mode not in ("query", "horary"):
+        return {"error": "chart_time_mode must be 'query' or 'horary'"}
+    as_of = as_of or datetime.now(timezone.utc)
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    query_jd = ephemeris_utils.to_jd(as_of)
+
     def _parse_houses(h_input):
         if not h_input: return set()
         if isinstance(h_input, list): return set(int(str(x).strip()) for x in h_input if str(x).strip().isdigit())
@@ -306,7 +461,7 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
     if not 1 <= key_house <= 12:
         key_house = 11
 
-    lat, lon = location_engine.get_coordinates(city)
+    lat, lon = coords if coords else location_engine.get_coordinates(city)
     if lat is None or lon is None: return {"error": "Location not found or GPS block active."}
     
     asc_data = kp_math.get_horary_chart(horary_number)
@@ -318,14 +473,18 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
     horary_star_lord = asc_data["star_lord"]  # the fixed Nakshatra lord from the 1-249 table
     
     # --- 1. Cusps, and the sign on every cusp ---
-    cusps = calculate_placidus_cusps(target_asc, lat, lon)
+    try:
+        cusps, horary_jd = calculate_horary_cusps(target_asc, lat, lon, query_jd)
+    except ValueError as e:
+        return {"error": str(e)}
     cusp_facts = kp_math.build_cusp_facts(cusps)
 
     # --- 2. House ownership: cusp sign -> ruling planet ---
     ownership = kp_math.build_house_ownership(cusp_facts)
 
     # --- 3. Planets: sign (degree // 30), house from cusp boundaries ---
-    planets, retrogrades = transit_engine.get_live_planets()
+    planet_jd = query_jd if chart_time_mode == "query" else horary_jd
+    planets, retrogrades = ephemeris_utils.planets_at(planet_jd)
     planet_houses = {p: kp_math.get_house_from_cusps(lon_val, cusps) for p, lon_val in planets.items()}
     planet_facts = build_planet_facts(planets, retrogrades, cusps, ownership)
 
@@ -335,14 +494,30 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
     deciding_planet = get_true_agent(cusp_sub_lord, planets)              # Rahu/Ketu act through their agent
     deciding_star_raw = kp_math.get_star_lord(planets[deciding_planet])   # the star the PLANET sits in (not the cusp's star)
     deciding_star = get_true_agent(deciding_star_raw, planets)
-    is_retrograde = bool(retrogrades.get(deciding_planet, False))
+    planet_retro = bool(retrogrades.get(deciding_planet, False))
+    star_retro = bool(retrogrades.get(deciding_star, False))
+    is_retrograde = planet_retro or star_retro
+    if planet_retro and star_retro:
+        retro_who = f"the deciding planet ({deciding_planet}) and its Star Lord ({deciding_star})"
+    elif planet_retro:
+        retro_who = f"the deciding planet ({deciding_planet})"
+    elif star_retro:
+        retro_who = f"the deciding planet's Star Lord ({deciding_star})"
+    else:
+        retro_who = ""
 
-    live_asc = get_live_ascendant(lat, lon)
+    live_asc = get_live_ascendant(lat, lon, as_of)
     rp_asc_sign_lord = get_sign_lord(live_asc)
     rp_asc_star_lord = get_star_lord(live_asc)
-    
+    rp_asc_sub_lord = kp_math.get_sub_lord(live_asc)
+
     moon_lon = planets["Moon"]
-    day_name, day_lord = get_current_day_lord(lon)
+    # Ruling planets belong to the moment of the question, so the RP Moon always comes from query time
+    rp_moon_lon = moon_lon if chart_time_mode == "query" else ephemeris_utils.planets_at(query_jd)[0]["Moon"]
+    rp_moon_sign_lord = get_sign_lord(rp_moon_lon)
+    rp_moon_star_lord = get_star_lord(rp_moon_lon)
+    rp_moon_sub_lord = kp_math.get_sub_lord(rp_moon_lon)
+    day_name, day_lord = get_current_day_lord(lon, as_of)
     current_tithi = get_panchang_tithi(planets["Sun"], moon_lon)
     
     saturn_lon = planets["Saturn"]
@@ -351,10 +526,13 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
     punarphoo_active = dist <= 3.33 
 
     # Ruling-planet confirmation (informational only - it does not change the score)
-    rp_names = {rp_asc_sign_lord, rp_asc_star_lord, get_sign_lord(moon_lon), get_star_lord(moon_lon), day_lord}
+    rp_names = {rp_asc_sign_lord, rp_asc_star_lord, rp_asc_sub_lord,
+                rp_moon_sign_lord, rp_moon_star_lord, rp_moon_sub_lord, day_lord}
+    rp_support = (deciding_planet in rp_names) or (deciding_star in rp_names)
     sub_in_rp = cusp_sub_lord in rp_names or deciding_planet in rp_names
     star_in_rp = deciding_star_raw in rp_names or deciding_star in rp_names
-    rp_text = (f"Ruling planet check (confirmation only, not scored): Cusp Sub Lord {deciding_planet} is "
+    rp_text = (f"Ruling planets (Ascendant sign/star/sub lord, Moon sign/star/sub lord, day lord): {', '.join(sorted(rp_names))}. "
+               f"Ruling planet check (confirmation only, not scored): Cusp Sub Lord {deciding_planet} is "
                f"{'' if sub_in_rp else 'not '}among the ruling planets; its Star Lord {deciding_star} is "
                f"{'' if star_in_rp else 'not '}among the ruling planets.")
 
@@ -362,7 +540,70 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
     step_breakdown, score = compute_step_breakdown(
         deciding_star, deciding_planet, planet_houses, ownership, planets, positive_set, negative_set
     )
-    verdict = decide_verdict(score, step_breakdown, is_retrograde, deciding_planet)
+    verdict = decide_verdict(score, step_breakdown, is_retrograde, deciding_planet, retro_who)
+    if _verdict_class(verdict) == "YES" and not rp_support:
+        verdict += (f" (Ruling Planets do not confirm this: neither the deciding planet ({deciding_planet}) "
+                    f"nor its Star Lord ({deciding_star}) is a Ruling Planet. Per KP, an event is unlikely to "
+                    f"materialize without Ruling Planet support, so treat this YES as unconfirmed.)")
+    # --- 5b. Secondary KP checks: 11th-CSL fulfillment + Moon genuineness ---
+    # Both are REPORTED SIGNALS ONLY: appended as cautions/confirmations, logged for
+    # backtesting, and never change the verdict class.
+    # Sources: KP Reader VI - "The 11th house shows fulfilment of desire" (11th-CSL
+    # passages); the Moon-reflects-the-querent\'s-mind genuineness check.
+    verdict_class = _verdict_class(verdict)
+
+    # (a) 11th cusp Sub Lord fulfillment check. Skipped as redundant when the key
+    # house itself is 11 (then the 11th CSL IS the deciding planet).
+    eleventh = {"applicable": key_house != 11}
+    if key_house != 11:
+        csl11_raw = cusp_facts[10]["sub_lord"]
+        csl11 = get_true_agent(csl11_raw, planets)
+        csl11_star_raw = kp_math.get_star_lord(planets[csl11])
+        csl11_star = get_true_agent(csl11_star_raw, planets)
+        _, score11 = compute_step_breakdown(
+            csl11_star, csl11, planet_houses, ownership, planets, positive_set, negative_set
+        )
+        csl11_retro = bool(retrogrades.get(csl11, False)) or bool(retrogrades.get(csl11_star, False))
+        cls11 = "confirms" if score11 >= 6 else ("contradicts" if score11 <= -6 else "neutral")
+        eleventh.update({
+            "cusp_sub_lord": csl11_raw, "deciding_planet": csl11,
+            "deciding_planet_star_lord": csl11_star, "score": score11,
+            "classification": cls11, "is_retrograde": csl11_retro,
+            "source": "KP Reader VI: 'The 11th house shows fulfilment of desire'",
+        })
+        if verdict_class == "YES" and cls11 == "contradicts":
+            verdict += (f" (Fulfillment check: the Sub Lord of the 11th cusp ({csl11}, score {score11:+d}) "
+                        f"signifies the unfavourable houses, so fulfillment of the desire is doubtful - "
+                        f"treat this YES as unconfirmed.)")
+        elif verdict_class == "YES" and cls11 == "confirms":
+            verdict += (f" (Fulfillment check: the Sub Lord of the 11th cusp ({csl11}, score {score11:+d}) "
+                        f"also signifies the favourable houses, confirming fulfillment of the desire.)")
+        elif verdict_class in ("NO", "DELAYED") and cls11 == "confirms":
+            verdict += (f" (Note: the Sub Lord of the 11th cusp of fulfillment ({csl11}) does signify the "
+                        f"favourable houses, but the key-house significations rule against the matter, "
+                        f"so the verdict stands.)")
+        if csl11_retro:
+            verdict += (f" (The 11th-cusp Sub Lord ({csl11}) or its Star Lord is retrograde, indicating "
+                        f"delay or obstruction in fulfillment - read as delay, not denial.)")
+
+    # (b) Moon genuineness check: the Moon reflects the querent\'s mind and should
+    # connect with the houses of the question. Reported only - never refuses judgment.
+    moon_star_raw = kp_math.get_star_lord(planets["Moon"])
+    moon_star = get_true_agent(moon_star_raw, planets)
+    _, moon_score = compute_step_breakdown(
+        moon_star, "Moon", planet_houses, ownership, planets, positive_set, negative_set
+    )
+    moon_reflected = moon_score >= 1
+    genuineness = {
+        "moon_star_lord": moon_star_raw, "moon_star_lord_agent": moon_star,
+        "moon_house": planet_houses.get("Moon"), "score": moon_score,
+        "reflected": moon_reflected,
+        "source": "KP Reader VI: verify the Moon reflects the querent\'s mind/question before judging",
+    }
+    if moon_score <= -1:
+        verdict += (" (Genuineness check: the Moon does not connect with the houses of this question, "
+                    "so the question may not be genuinely rooted - the judgment above stands, but treat "
+                    "it with reserve.)")
 
     step_1_house = planet_houses.get(deciding_star, 0)
     step_2_house = planet_houses.get(deciding_planet, 0)
@@ -374,6 +615,51 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
         p: f"{p} owns {kp_math.format_house_list(hs)}" for p, hs in ownership.items()
     }
 
+    node_rule, node_rule_text, star_rule_text = None, "", ""
+    if cusp_sub_lord != deciding_planet:
+        _, node_rule, node_rule_text = get_node_agent_info(cusp_sub_lord, planets)
+    if deciding_star_raw != deciding_star:
+        star_rule_text = get_node_agent_info(deciding_star_raw, planets)[2]
+
+    ruling_planets = {
+        "asc_sign_lord": rp_asc_sign_lord, "asc_star_lord": rp_asc_star_lord, "asc_sub_lord": rp_asc_sub_lord,
+        "moon_sign_lord": rp_moon_sign_lord, "moon_star_lord": rp_moon_star_lord, "moon_sub_lord": rp_moon_sub_lord,
+        "day_lord": day_lord,
+    }
+
+    # --- Optional timing (Vimshottari at the chart moment). Never allowed to break a reading. ---
+    timing = None
+    if include_timing:
+        try:
+            timing = timing_engine.compute_timing(
+                planets, planet_houses, ownership, positive_set, negative_set,
+                chart_time=ephemeris_utils.from_jd(planet_jd), agent_fn=get_true_agent,
+                verdict_class=_verdict_class(verdict), ruling_planets=rp_names)
+        except Exception as e:
+            timing = {"error": f"Timing could not be computed: {type(e).__name__}: {e}"}
+
+    # --- Optional transit confirmation (gochar cross-check). Never allowed to break a reading. ---
+    # Transit is read at the QUERY moment (as_of), not wall-clock now, so a reading is fully
+    # reproducible from its inputs (same inputs + same as_of -> identical output).
+    transit = None
+    try:
+        planets_now, retro_now = transit_engine.get_planets_at(as_of)
+        transit = transit_confirmation(cusps, positive_set, key_house, deciding_planet, deciding_star,
+                                       rp_names, planets_now, retro_now)
+        transit["as_of_utc"] = as_of.isoformat()
+        nxt = (timing or {}).get("next_supportive_antara") or {}
+        if nxt.get("start"):
+            when = datetime.fromisoformat(nxt["start"])
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            planets_fut, retro_fut = transit_engine.get_planets_at(when)
+            transit["at_next_antara"] = transit_confirmation(
+                cusps, positive_set, key_house, deciding_planet, deciding_star,
+                rp_names, planets_fut, retro_fut)
+            transit["at_next_antara"]["window"] = f"{nxt.get('start')} to {nxt.get('end')}"
+    except Exception as e:
+        transit = {"error": f"Transit check could not be computed: {type(e).__name__}: {e}"}
+
     decision = {
         "key_house": key_house,
         "key_house_cusp": key_cusp["summary"],
@@ -381,9 +667,20 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
         "deciding_planet": deciding_planet,
         "deciding_planet_star_lord": deciding_star,
         "deciding_planet_is_retrograde": is_retrograde,
-        "note": (f"{cusp_sub_lord} is a node and acts through its agent {deciding_planet}. " if cusp_sub_lord != deciding_planet else "")
+        "retrograde_who": retro_who,
+        "retrograde_rule_note": ("Retrograde is treated as a delay indicator only in this project, never as an "
+                                  "automatic denial - classical KP sources disagree on whether it denies or "
+                                  "merely delays, so a negative score with a retrograde deciding planet or Star "
+                                  "Lord is reported as DELAYED, NOT DENIED rather than as NO."),
+        "ruling_planet_support": rp_support,
+        "node_agent_rule": node_rule,
+        "note": (f"{cusp_sub_lord} is a node and acts through its agent {deciding_planet} ({node_rule_text}). " if cusp_sub_lord != deciding_planet else "")
+                + (f"{deciding_star_raw} (the Star Lord) is a node and acts through {deciding_star} ({star_rule_text}). " if deciding_star_raw != deciding_star else "")
                 + (f"{deciding_planet} sits in its own star, so its occupation and ownership are counted once."
                    if deciding_star == deciding_planet else ""),
+        "eleventh_csl_check": eleventh,
+        "moon_genuineness": genuineness,
+        "transit_confirmation": transit,
     }
 
     # Text-only payload for the LLM: no raw longitudes, nothing left to calculate.
@@ -405,6 +702,22 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
             "star_lord_in_ruling_planets": star_in_rp,
             "text": rp_text,
         },
+        "secondary_signals": {
+            "eleventh_csl_fulfillment": (
+                "Not applicable: the key house is the 11th, so the 11th CSL is the deciding planet itself."
+                if not eleventh["applicable"] else
+                f"11th CSL {eleventh['deciding_planet']} (cusp sub lord {eleventh['cusp_sub_lord']}, star lord "
+                f"{eleventh['deciding_planet_star_lord']}) scores {eleventh['score']:+d} against the question houses: "
+                f"{eleventh['classification']}. Retrograde: {eleventh['is_retrograde']}."
+            ),
+            "moon_genuineness": (
+                f"Moon sits in house {genuineness['moon_house']}, star lord {genuineness['moon_star_lord']}: "
+                f"signification score {genuineness['score']:+d} against the question houses - "
+                + ("reflected: the question reads as genuine." if genuineness["reflected"]
+                   else "not reflected: treat the question\'s genuineness with reserve (judgment still given)." if genuineness["score"] <= -1
+                   else "neutral: no clear connection either way.")
+            )
+        },
         "target_positive_houses": sorted(positive_set),
         "target_negative_houses": sorted(negative_set),
         "step_breakdown": step_breakdown,
@@ -412,16 +725,23 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
         "house_ownership": house_ownership_text,
         "planets": [f["summary"] for f in planet_facts],
         "panchang": {"day_name": day_name, "tithi": current_tithi},
-        "ruling_planets": {
-            "asc_sign_lord": rp_asc_sign_lord,
-            "asc_star_lord": rp_asc_star_lord,
-            "moon_sign_lord": get_sign_lord(moon_lon),
-            "moon_star_lord": get_star_lord(moon_lon),
-            "day_lord": day_lord,
-        },
+        "ruling_planets": ruling_planets,
     }
+    if timing is not None:
+        ai_facts["timing"] = timing
+    if transit is not None:
+        ai_facts["transit_confirmation"] = transit
         
-    return {
+    chart_time = {
+        "mode": chart_time_mode,
+        "query_utc": as_of.isoformat(),
+        "cusp_moment_utc": ephemeris_utils.from_jd(horary_jd).isoformat(),
+        "gap_minutes": round((horary_jd - query_jd) * 1440.0, 1),
+        "lat": lat, "lon": lon,
+    }
+
+    result = {
+        "chart_time": chart_time,
         "verdict": verdict, "kp_score": score, "horary_number": horary_number, "horary_sign": horary_sign,
         "horary_ascendant_longitude": target_asc, "horary_asc_lord": horary_asc_lord,
         "sub_lord": horary_sub_lord, "star_lord": horary_star_lord, "is_retrograde": is_retrograde,
@@ -449,7 +769,18 @@ def execute_kp_reading(city, horary_number, positive_houses, negative_houses, ke
         "planet_facts": planet_facts,
         "house_ownership": ownership,
         "panchang": {"day_name": day_name, "tithi": current_tithi},
-        "ruling_planets": {"asc_sign_lord": rp_asc_sign_lord, "asc_star_lord": rp_asc_star_lord, "moon_sign_lord": get_sign_lord(moon_lon), "moon_star_lord": get_star_lord(moon_lon), "day_lord": day_lord},
+        "ruling_planets": ruling_planets, "timing": timing,
         "chart_data": {"cusps": list(cusps), "planets": planets, "planet_houses": planet_houses},
         "ai_facts": ai_facts,
     }
+
+    if log:
+        kp_logger.log_reading({
+            "inputs": {"city": city, "horary_number": horary_number, "positive": sorted(positive_set),
+                       "negative": sorted(negative_set), "key_house": key_house,
+                       "mode": chart_time_mode},
+            "chart_time": chart_time,
+            "verdict": verdict, "score": score,
+            "decision": decision, "ai_facts": ai_facts,
+        })
+    return result
